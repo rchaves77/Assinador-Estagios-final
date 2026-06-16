@@ -59,7 +59,7 @@ export default function App() {
           
           {/* Logo / Brand */}
           <div className="cursor-pointer" onClick={() => handleRouteSelection("student")}>
-            <p className="text-[10px] uppercase tracking-[0.18em] font-black text-odonto-gold mb-1">Chancela Digital de Estágios</p>
+            <p className="text-[10px] uppercase tracking-[0.18em] font-black text-odonto-gold mb-1">Assinador de Estágios</p>
             <h1 className="text-xl md:text-2xl lg:text-3xl font-black tracking-tight leading-snug text-odonto-navy uppercase">
               ODONTOLOGIA <span className="inline-block px-2.5 py-0.5 bg-odonto-navy text-white border-2 border-odonto-gold transform -skew-x-2">ESTÁCIO UNIMETA</span>
             </h1>

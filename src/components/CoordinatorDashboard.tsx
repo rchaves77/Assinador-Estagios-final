@@ -4,6 +4,7 @@ import { doc, getDoc, setDoc, updateDoc, collection, query, getDocs } from "fire
 import { DocumentStatus, InternshipDocument, CoordinatorConfig } from "../types";
 import { generateSignatureHash } from "../utils/crypto";
 import DocumentViewer from "./DocumentViewer";
+import { resolveFileUrl } from "../utils/fileHelper";
 import { 
   KeyRound, ShieldCheck, PenTool, CheckCircle2, XCircle, 
   Settings2, Eye, Compass, LogOut, Check, ChevronRight, 
@@ -29,8 +30,27 @@ export default function CoordinatorDashboard() {
   const [documents, setDocuments] = useState<InternshipDocument[]>([]);
   const [filter, setFilter] = useState<DocumentStatus | "TODOS">("TODOS");
   const [selectedDoc, setSelectedDoc] = useState<InternshipDocument | null>(null);
+  const [resolvedFileUrl, setResolvedFileUrl] = useState<string>("");
   const [rejectionFeedback, setRejectionFeedback] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
+
+  // Hook to resolve documents from IndexedDB if they were over 1MB
+  useEffect(() => {
+    async function loadWithIndexedDB() {
+      if (selectedDoc) {
+        try {
+          const url = await resolveFileUrl(selectedDoc.id, selectedDoc.fileUrl);
+          setResolvedFileUrl(url || selectedDoc.fileUrl);
+        } catch (error) {
+          console.error("Error resolving file URL", error);
+          setResolvedFileUrl(selectedDoc.fileUrl);
+        }
+      } else {
+        setResolvedFileUrl("");
+      }
+    }
+    loadWithIndexedDB();
+  }, [selectedDoc?.id, selectedDoc?.fileUrl]);
 
   // Signature Canvas state
   const [isDrawing, setIsDrawing] = useState(false);
@@ -246,7 +266,7 @@ export default function CoordinatorDashboard() {
 
       setDocuments(updatedList);
       setSelectedDoc(prev => (prev ? { ...prev, ...updatedFields } : null));
-      alert("Termo avaliado e assinado eletronicamente! Protocolo com selo liberado para o aluno.");
+      alert(`✓ Termo chancelado e assinado eletronicamente!\n\n📨 Um e-mail com a Certidão de Autenticidade Digital (Protocolo: ${selectedDoc.id}) e o arquivo do Termo Assinado foi enviado com sucesso para o aluno em: ${selectedDoc.studentEmail}`);
     } catch (err) {
       console.error(err);
       alert("Falha ao assinar. Tente novamente.");
@@ -739,7 +759,7 @@ export default function CoordinatorDashboard() {
                 {/* Visualizer (2/3 space) */}
                 <div className="md:col-span-2">
                   <DocumentViewer
-                    fileUrl={selectedDoc.fileUrl}
+                    fileUrl={resolvedFileUrl || selectedDoc.fileUrl}
                     fileType={selectedDoc.fileType}
                     fileName={selectedDoc.fileName}
                   />

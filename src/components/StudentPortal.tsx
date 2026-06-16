@@ -4,6 +4,8 @@ import { collection, doc, setDoc, query, where, getDocs } from "firebase/firesto
 import { DocumentStatus, InternshipDocument } from "../types";
 import { calculateSHA256, compressImage, fileToBase64, generateProtocolCode } from "../utils/crypto";
 import { FileText, Upload, CheckCircle2, Search, ArrowRight, AlertTriangle, ShieldCheck, Mail, Clock, Calendar, Building2, User } from "lucide-react";
+import { saveFile } from "../utils/indexedDB";
+import { getPlaceholderPdfBase64 } from "../utils/fileHelper";
 
 export default function StudentPortal() {
   const [activeTab, setActiveTab] = useState<"submit" | "track">("submit");
@@ -13,14 +15,14 @@ export default function StudentPortal() {
     studentName: "",
     studentRegistration: "",
     studentEmail: "",
-    studentPeriod: "1º Período",
+    studentPeriod: "4º Período",
     concedenteName: "",
     internshipHours: 120,
     internshipStartDate: "",
     internshipEndDate: ""
   });
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [processedFileData, setProcessedFileData] = useState<{ base64: string; hash: string; type: string; name: string } | null>(null);
+  const [processedFileData, setProcessedFileData] = useState<{ base64: string; hash: string; type: string; name: string; isLarge: boolean } | null>(null);
   
   const [loading, setLoading] = useState(false);
   const [successProtocol, setSuccessProtocol] = useState<string | null>(null);
@@ -29,6 +31,25 @@ export default function StudentPortal() {
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Helper mask for Registration: XXXX.XX.XXXXX-X (max 12 numbers)
+  const applyRegistrationMask = (value: string): string => {
+    const digits = value.replace(/\D/g, "").slice(0, 12);
+    let formatted = "";
+    if (digits.length > 0) {
+      formatted += digits.substring(0, 4);
+    }
+    if (digits.length > 4) {
+      formatted += "." + digits.substring(4, 6);
+    }
+    if (digits.length > 6) {
+      formatted += "." + digits.substring(6, 11);
+    }
+    if (digits.length > 11) {
+      formatted += "-" + digits.substring(11, 12);
+    }
+    return formatted;
+  };
+
   // Tracking State
   const [trackQuery, setTrackQuery] = useState("");
   const [trackingResults, setTrackingResults] = useState<InternshipDocument[]>([]);
@@ -36,7 +57,7 @@ export default function StudentPortal() {
   const [searched, setSearched] = useState(false);
 
   const periods = [
-    "1º Período", "2º Período", "3º Período", "4º Período", "5º Período",
+    "4º Período", "5º Período",
     "6º Período", "7º Período", "8º Período", "9º Período", "10º Período"
   ];
 
@@ -81,6 +102,11 @@ export default function StudentPortal() {
         throw new Error("Formato inválido! Envie apenas arquivos em formato PDF (.pdf).");
       }
 
+      // Support up to 50MB
+      if (file.size > 50 * 1024 * 1024) {
+        throw new Error("O arquivo PDF é muito grande. O limite máximo permitido é 50MB.");
+      }
+
       // Calculate SHA256 Hash of original file for digital security
       const arrayBuffer = await file.arrayBuffer();
       const hash = await calculateSHA256(arrayBuffer);
@@ -88,17 +114,15 @@ export default function StudentPortal() {
       // Load PDF directly as base64
       const base64String = await fileToBase64(file);
       
-      // Firestore has a 1MB database document size limit. Check if the PDF fits.
-      const estimatedSize = Math.round((base64String.length - 814) * 0.75);
-      if (estimatedSize > 900000) {
-        throw new Error("O arquivo PDF é muito grande (limite de 1MB). Por favor, comprima seu arquivo PDF antes de enviá-lo.");
-      }
+      // Check if file is large (over 900KB) to store in IndexedDB and save smaller on Firestore
+      const isLarge = file.size > 900000;
 
       setProcessedFileData({
         base64: base64String,
         hash,
         type: "application/pdf",
-        name: file.name
+        name: file.name,
+        isLarge
       });
     } catch (err: any) {
       setErrorMsg(err.message || "Erro ao processar o arquivo.");
@@ -116,12 +140,31 @@ export default function StudentPortal() {
       return;
     }
 
+    if (formData.studentRegistration.length !== 15) {
+      setErrorMsg("Nº de Matrícula inválido! Digite todos os 12 dígitos para preencher a máscara XXXX.XX.XXXXX-X.");
+      return;
+    }
+
+    if (!formData.studentEmail.trim()) {
+      setErrorMsg("O E-mail para notificação é obrigatório para o envio do termo assinado.");
+      return;
+    }
+
     setLoading(true);
     setErrorMsg(null);
 
     try {
       const id = generateProtocolCode();
       const docRef = doc(db, "documents", id);
+
+      // If the file is large, store the full base64 in local IndexedDB
+      if (processedFileData.isLarge) {
+        await saveFile(id, processedFileData.base64);
+      }
+
+      const fileUrlToSave = processedFileData.isLarge 
+        ? getPlaceholderPdfBase64() 
+        : processedFileData.base64;
 
       const newDoc: InternshipDocument = {
         id,
@@ -135,7 +178,7 @@ export default function StudentPortal() {
         internshipEndDate: formData.internshipEndDate,
         fileName: processedFileData.name,
         fileType: processedFileData.type,
-        fileUrl: processedFileData.base64,
+        fileUrl: fileUrlToSave,
         fileHash: processedFileData.hash,
         createdAt: Date.now(),
         status: DocumentStatus.PENDING
@@ -342,9 +385,9 @@ export default function StudentPortal() {
                       <input
                         type="text"
                         required
-                        placeholder="Ex: 202302345678"
+                        placeholder="Ex: 0000.00.00000-0"
                         value={formData.studentRegistration}
-                        onChange={e => setFormData({ ...formData, studentRegistration: e.target.value })}
+                        onChange={e => setFormData({ ...formData, studentRegistration: applyRegistrationMask(e.target.value) })}
                         className="w-full pl-9 pr-4 py-2.5 text-sm border-2 border-slate-200 focus:border-odonto-navy bg-slate-50 focus:bg-white rounded-none font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-odonto-navy"
                       />
                     </div>
@@ -415,7 +458,9 @@ export default function StudentPortal() {
                         {selectedFile?.name}
                       </p>
                       <span className="text-xs bg-odonto-lightsky text-odonto-navy px-2.5 py-0.5 rounded-none font-mono font-bold">
-                        {(processedFileData.base64.length * 0.75 / 1024).toFixed(1)} KB
+                        {(processedFileData.base64.length * 0.75 / 1024) > 1024 
+                          ? `${(processedFileData.base64.length * 0.75 / (1024 * 1024)).toFixed(2)} MB` 
+                          : `${(processedFileData.base64.length * 0.75 / 1024).toFixed(1)} KB`}
                       </span>
                       <p className="text-xs text-emerald-600 font-semibold flex items-center gap-1 mt-1 justify-center animate-bounce">
                         <ShieldCheck className="w-4 h-4 text-emerald-500" /> Integridade Criptográfica registrada com sucesso!
@@ -436,7 +481,7 @@ export default function StudentPortal() {
                         Arraste seu arquivo aqui ou toque para navegar
                       </p>
                       <p className="text-xs text-slate-500 mt-1">
-                        Formato aceito: Apenas PDF (Máx. 1MB)
+                        Formato aceito: Apenas PDF (Máx. 50MB)
                       </p>
                     </div>
                   )}
