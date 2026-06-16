@@ -640,32 +640,57 @@ export default function StudentPortal() {
 
                     {/* Seal certificates if approved */}
                     {docItem.status === DocumentStatus.APPROVED && (
-                      <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4 flex flex-col md:flex-row gap-4 justify-between items-start md:items-center">
-                        <div className="space-y-1">
-                          <span className="text-xs font-bold text-emerald-950 flex items-center gap-1">
-                            <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" /> Chancelado Eletronicamente!
-                          </span>
-                          <p className="text-[10px] text-emerald-800 leading-relaxed max-w-md">
-                            Chancela digital de autenticidade assinada pelo coordenador de Odontologia <strong>{docItem.coordinatorName}</strong> baseada no Hash de Arquivo original.
-                          </p>
-                          <div className="text-[9px] font-mono text-emerald-700 select-all bg-emerald-100/50 p-1 rounded">
-                            Chave Hash: {docItem.signatureHash}
+                      <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4 space-y-4">
+                        <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center">
+                          <div className="space-y-1">
+                            <span className="text-xs font-bold text-emerald-950 flex items-center gap-1">
+                              <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" /> Chancelado Eletronicamente!
+                            </span>
+                            <p className="text-[10px] text-emerald-800 leading-relaxed max-w-md font-semibold">
+                              Chancela digital de autenticidade homologada eletronicamente pelo coordenador <strong>{docItem.coordinatorName}</strong>.
+                            </p>
+                            <div className="text-[9px] font-mono text-emerald-700 select-all bg-emerald-100/50 p-1 rounded">
+                              Chave de Chancela: {docItem.signatureKey || docItem.id}
+                            </div>
                           </div>
+
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              const newUrl = `${window.location.origin}/?protocolo=${docItem.id}#validador`;
+                              window.history.pushState({}, "", newUrl);
+                              window.location.hash = "validador";
+                              window.dispatchEvent(new CustomEvent("route-change", { detail: "validador" }));
+                            }}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2.5 px-4 rounded-lg transition shrink-0 flex items-center gap-1.5 shadow-sm cursor-pointer"
+                          >
+                            <ShieldCheck className="w-4 h-4" /> Ir para o Validador
+                          </button>
                         </div>
 
-                        {/* Public Link to Certificado */}
-                        <a
-                          href={`#validador`}
-                          onClick={() => {
-                            // Let parents scroll or switch window hash
-                            window.location.hash = "validador";
-                            // Dispatch custom event to app to sync routes
-                            window.dispatchEvent(new CustomEvent("route-change", { detail: "validador" }));
-                          }}
-                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2 px-3.5 rounded-lg transition shrink-0 flex items-center gap-1 shadow-sm"
-                        >
-                          <ShieldCheck className="w-3.5 h-3.5" /> Baixar Certificado/Validar
-                        </a>
+                        {/* Interactive QR Code & Link Helper section */}
+                        <div className="border-t border-emerald-200/50 pt-3 flex flex-col sm:flex-row items-center gap-4 bg-white/60 p-3 rounded-lg">
+                          <img
+                            src={`https://api.qrserver.com/v1/create-qr-code/?size=90x90&data=${encodeURIComponent(`${window.location.origin}/?protocolo=${docItem.id}#validador`)}`}
+                            alt="QR Autenticador"
+                            className="w-16 h-16 border border-slate-200 p-1 bg-white rounded shrink-0 select-none"
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="space-y-1 text-center sm:text-left">
+                            <span className="text-[9px] font-black uppercase text-slate-500 tracking-wider block">QR Code de Autenticidade Clínica</span>
+                            <p className="text-[10px] text-slate-500 font-semibold">
+                              Escaneie a imagem com o celular ou clique no link direto abaixo para verificar a autenticidade acadêmica jurídica imediata:
+                            </p>
+                            <a
+                              href={`${window.location.origin}/?protocolo=${docItem.id}#validador`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs font-bold text-odonto-navy hover:underline break-all inline-block hover:text-odonto-sky transition-colors cursor-pointer"
+                            >
+                              {window.location.origin}/?protocolo={docItem.id}
+                            </a>
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { ZoomIn, ZoomOut, RotateCw, Download, FileText, ImageIcon } from "lucide-react";
+import { useState, useEffect } from "react";
+import { ZoomIn, ZoomOut, RotateCw, Download, FileText, ImageIcon, Eye } from "lucide-react";
 
 interface DocumentViewerProps {
   fileUrl: string;
@@ -10,9 +10,40 @@ interface DocumentViewerProps {
 export default function DocumentViewer({ fileUrl, fileType, fileName }: DocumentViewerProps) {
   const [zoom, setZoom] = useState<number>(100);
   const [rotation, setRotation] = useState<number>(0);
+  const [blobUrl, setBlobUrl] = useState<string>("");
 
   const isPdf = fileType.includes("pdf") || fileUrl.startsWith("data:application/pdf");
   const isImage = fileType.startsWith("image/") || fileUrl.startsWith("data:image/");
+
+  useEffect(() => {
+    let url = "";
+    if (fileUrl.startsWith("data:application/pdf")) {
+      try {
+        const parts = fileUrl.split(';base64,');
+        const contentType = parts[0].split(':')[1] || "application/pdf";
+        const byteCharacters = atob(parts[1]);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: contentType });
+        url = URL.createObjectURL(blob);
+        setBlobUrl(url);
+      } catch (e) {
+        console.error("Error creating blob URL from base64:", e);
+        setBlobUrl(fileUrl);
+      }
+    } else {
+      setBlobUrl(fileUrl);
+    }
+
+    return () => {
+      if (url && url.startsWith("blob:")) {
+        URL.revokeObjectURL(url);
+      }
+    };
+  }, [fileUrl]);
 
   const handleRotate = () => {
     setRotation(prev => (prev + 90) % 360);
@@ -42,6 +73,18 @@ export default function DocumentViewer({ fileUrl, fileType, fileName }: Document
         </div>
 
         <div className="flex items-center gap-2 bg-slate-905 bg-opacity-50 p-1 rounded-lg">
+          {isPdf && blobUrl && (
+            <a
+              href={blobUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-slate-700 hover:text-white rounded text-xs text-odonto-gold font-bold transition mr-1"
+              title="Visualizar em Tela Cheia"
+            >
+              <Eye className="w-4 h-4 text-odonto-gold" />
+              <span className="hidden sm:inline">Tela Cheia</span>
+            </a>
+          )}
           {isImage && (
             <>
               <button
@@ -75,9 +118,9 @@ export default function DocumentViewer({ fileUrl, fileType, fileName }: Document
             </>
           )}
           <a
-            href={fileUrl}
+            href={blobUrl || fileUrl}
             download={fileName}
-            className="p-1.5 hover:bg-slate-700 rounded text-sky-400 transition ml-1"
+            className="p-1.5 hover:bg-slate-700 rounded text-sky-450 transition ml-1"
             title="Baixar Arquivo Original"
           >
             <Download className="w-4 h-4" />
@@ -88,27 +131,39 @@ export default function DocumentViewer({ fileUrl, fileType, fileName }: Document
       {/* Main File Viewport */}
       <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-slate-950 relative min-h-[300px] md:min-h-[500px]">
         {isPdf ? (
-          <div className="w-full h-full min-h-[400px] md:min-h-[550px] flex flex-col items-center justify-center">
-            <object
-              data={fileUrl}
-              type="application/pdf"
-              className="w-full h-full rounded border border-slate-800"
-            >
-              <embed src={fileUrl} type="application/pdf" />
-              <div className="text-center p-6 text-slate-400 max-w-sm">
-                <FileText className="w-12 h-12 text-slate-500 mx-auto mb-3" />
-                <p className="text-sm mb-4">
-                  Visualização interna não suportada pelo navegador ou em dispositivo móvel.
-                </p>
-                <a
-                  href={fileUrl}
-                  download={fileName}
-                  className="inline-flex items-center gap-2 bg-slate-900 hover:bg-black text-white font-black text-[10px] uppercase tracking-widest px-4 py-2.5 rounded-none transition border border-slate-750"
-                >
-                  <Download className="w-4 h-4" /> Baixar PDF para Avaliar
-                </a>
+          <div className="w-full h-full min-h-[400px] md:min-h-[550px] flex flex-col items-center justify-center relative">
+            {blobUrl ? (
+              <iframe
+                src={blobUrl}
+                title={fileName}
+                className="w-full h-full rounded border-2 border-slate-800 bg-white"
+                style={{ minHeight: "550px" }}
+              />
+            ) : (
+              <div className="text-center p-6 text-slate-400">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-odonto-gold mx-auto mb-4"></div>
+                <p className="text-sm font-mono">Processando PDF com Segurança...</p>
               </div>
-            </object>
+            )}
+            
+            {/* Action Overlay/Toolbar */}
+            <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex gap-3 bg-slate-900 bg-opacity-95 p-3 shadow-2xl border-2 border-slate-700 max-w-md w-11/12 justify-center z-10 rounded-sm">
+              <a
+                href={blobUrl || fileUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 bg-odonto-navy hover:bg-black text-white font-black text-[10px] uppercase tracking-widest px-4 py-2.5 rounded-none transition border border-odonto-gold"
+              >
+                <Eye className="w-4 h-4 text-odonto-gold" /> Visualizar Cheio / Imprimir
+              </a>
+              <a
+                href={blobUrl || fileUrl}
+                download={fileName}
+                className="inline-flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-[10px] uppercase tracking-widest px-4 py-2.5 rounded-none transition border border-slate-650"
+              >
+                <Download className="w-4 h-4 text-sky-400" /> Baixar PDF
+              </a>
+            </div>
           </div>
         ) : isImage ? (
           <div

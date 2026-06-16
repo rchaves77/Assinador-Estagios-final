@@ -339,24 +339,21 @@ export default function SignatureValidator() {
                 </span>
               </div>
 
-              {/* Hand signature image middle and text seal (Right on print) */}
+              {/* Electronic validation seal containing letters and numbers */}
               <div className="md:col-span-2 flex flex-col items-center md:items-end md:justify-center text-center md:text-right space-y-3">
                 <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider">
-                  Assinatura Eletrônica Registrada
+                  Selo Eletrônico de Autenticidade
                 </span>
 
-                {checkedDoc.signaturePng && (
-                  <div className="relative inline-block max-w-full">
-                    <img
-                      src={checkedDoc.signaturePng}
-                      alt="Assinatura manuscrita do coordenador"
-                      className="max-h-16 object-contain filter select-none pointer-events-none"
-                      style={{ mixBlendMode: "multiply" }}
-                      referrerPolicy="no-referrer"
-                    />
-                    <div className="absolute inset-0 border border-blue-200 border-opacity-20 pointer-events-none bg-blue-50/10 rounded" />
+                <div className="bg-slate-50 border-2 border-odonto-navy p-3 text-center rounded-none shadow-sm min-w-[210px] md:text-right md:items-end flex flex-col justify-center">
+                  <span className="text-[8px] font-extrabold text-slate-400 tracking-widest block uppercase">Chave de Chancela</span>
+                  <span className="text-sm font-mono font-black text-blue-900 tracking-wider uppercase block select-all">
+                    {checkedDoc.signatureKey || checkedDoc.id || "-"}
+                  </span>
+                  <div className="border-t border-dashed border-slate-300 mt-1.5 pt-1.5 text-[8px] text-emerald-800 font-black uppercase tracking-widest flex items-center justify-end gap-1">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 inline" /> ASSINATURA ELETRÔNICA
                   </div>
-                )}
+                </div>
 
                 <div className="space-y-1 text-slate-700 font-sans text-xs">
                   <p className="font-extrabold tracking-wide text-slate-900 border-b border-dashed border-slate-200 pb-1">

@@ -26,6 +26,20 @@ export default function CoordinatorDashboard() {
     accessCode: ""
   });
 
+  // Edit Settings states for electronic signature key
+  const [editName, setEditName] = useState("");
+  const [editTitle, setEditTitle] = useState("");
+  const [editSignatureKey, setEditSignatureKey] = useState("");
+
+  // Sync settings inputs when config loads
+  useEffect(() => {
+    if (config) {
+      setEditName(config.name);
+      setEditTitle(config.title);
+      setEditSignatureKey(config.signatureKey || "");
+    }
+  }, [config]);
+
   // Main Dashboard states
   const [documents, setDocuments] = useState<InternshipDocument[]>([]);
   const [filter, setFilter] = useState<DocumentStatus | "TODOS">("TODOS");
@@ -70,7 +84,15 @@ export default function CoordinatorDashboard() {
     try {
       const configDoc = await getDoc(doc(db, "config", "coordinator"));
       if (configDoc.exists()) {
-        setConfig(configDoc.data() as CoordinatorConfig);
+        const loadedData = configDoc.data() as CoordinatorConfig;
+        if (!loadedData.signatureKey) {
+          const generatedKey = "ODONTO-SIG-" + Math.random().toString(36).substring(2, 8).toUpperCase();
+          const migratedData = { ...loadedData, signatureKey: generatedKey };
+          await updateDoc(doc(db, "config", "coordinator"), { signatureKey: generatedKey });
+          setConfig(migratedData);
+        } else {
+          setConfig(loadedData);
+        }
       }
     } catch (err) {
       console.error("Error reading coordinator profile", err);
@@ -125,11 +147,13 @@ export default function CoordinatorDashboard() {
 
     setLoading(true);
     try {
+      const randomKey = "ODONTO-SIG-" + Math.random().toString(36).substring(2, 8).toUpperCase();
       const newConfig: CoordinatorConfig = {
         name: setupForm.name.trim(),
         title: setupForm.title.trim(),
         institution: setupForm.institution.trim(),
-        accessCode: setupForm.accessCode.trim()
+        accessCode: setupForm.accessCode.trim(),
+        signatureKey: randomKey
       };
 
       await setDoc(doc(db, "config", "coordinator"), newConfig);
@@ -207,22 +231,35 @@ export default function CoordinatorDashboard() {
     setHasDrawn(false);
   };
 
-  const saveSignature = async () => {
-    const canvas = canvasRef.current;
-    if (!canvas || !config || !hasDrawn) return;
+  const generateRandomKey = () => {
+    const key = "ODONTO-SIG-" + Math.random().toString(36).substring(2, 8).toUpperCase();
+    setEditSignatureKey(key);
+  };
 
-    const signaturePng = canvas.toDataURL("image/png");
-    
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!config) return;
+    if (!editName.trim() || !editTitle.trim() || !editSignatureKey.trim()) {
+      alert("Por favor, preencha todos os campos do perfil de assinatura eletrônica.");
+      return;
+    }
+
     setLoading(true);
     try {
-      const updatedConfig = { ...config, savedSignature: signaturePng };
-      await updateDoc(doc(db, "config", "coordinator"), { savedSignature: signaturePng });
+      const updatedConfig = {
+        ...config,
+        name: editName.trim(),
+        title: editTitle.trim(),
+        signatureKey: editSignatureKey.trim().toUpperCase()
+      };
+      
+      await setDoc(doc(db, "config", "coordinator"), updatedConfig);
       setConfig(updatedConfig);
-      alert("Sua assinatura manual foi digitalizada e salva no seu perfil com segurança!");
+      alert("Sua chave de assinatura eletrônica e perfil foram salvos com sucesso!");
       setShowSettings(false);
     } catch (err) {
-      console.error("Signature save error", err);
-      alert("Erro ao persistir assinatura.");
+      console.error("Error saving settings", err);
+      alert("Erro ao persistir configurações da chave eletrônica.");
     } finally {
       setLoading(false);
     }
@@ -232,10 +269,6 @@ export default function CoordinatorDashboard() {
 
   const handleApprove = async () => {
     if (!selectedDoc || !config) return;
-    if (!config.savedSignature) {
-      alert("Atenção: Você precisa cadastrar sua assinatura manual antes de chancelar termos! Acesse a aba Configurações de Assinatura acima.");
-      return;
-    }
 
     setActionLoading(true);
     try {
@@ -244,14 +277,15 @@ export default function CoordinatorDashboard() {
       
       // Calculate secure digital seal hash linking coordinator + doc hash + unique timestamp keys
       const sHash = await generateSignatureHash(documentHash, config.name, timestamp);
+      const sealKey = config.signatureKey || "ODONTO-SIG-" + Math.random().toString(36).substring(2, 8).toUpperCase();
 
       const updatedFields = {
         status: DocumentStatus.APPROVED,
         reviewedAt: timestamp,
         coordinatorName: config.name,
-        coordinatorSignatureText: `${config.title} - Assinado eletronicamente via Sistema Estácio Unimeta.`,
+        coordinatorSignatureText: `${config.title} - Chancelado eletronicamente via Sistema Estácio Unimeta.`,
         signatureHash: sHash,
-        signaturePng: config.savedSignature
+        signatureKey: sealKey
       };
 
       await updateDoc(doc(db, "documents", selectedDoc.id), updatedFields);
@@ -491,7 +525,7 @@ export default function CoordinatorDashboard() {
             }`}
             id="settings-toggle-btn"
           >
-            <PenTool className="w-4 h-4 text-odonto-gold" /> Assinatura Digital Manual
+            <Settings2 className="w-4 h-4 text-odonto-gold" /> Configurar Chave Eletrônica
           </button>
           
           <button
@@ -509,90 +543,90 @@ export default function CoordinatorDashboard() {
         </div>
       </div>
 
-      {/* Settings Signature DrawPad drawer */}
+      {/* Settings Signature Key Drawer */}
       {showSettings && (
-        <div className="bg-white border-2 border-odonto-navy rounded-none p-6 relative shadow-xl" id="drawpad-modal">
-          <div className="max-w-xl mx-auto space-y-4">
-            <div className="flex justify-between items-center">
+        <div className="bg-white border-2 border-odonto-navy rounded-none p-6 relative shadow-xl" id="signature-key-modal">
+          <div className="max-w-xl mx-auto">
+            <div className="flex justify-between items-center mb-6">
               <div>
-                <h3 className="text-md font-black uppercase tracking-tight text-slate-900">Configuração de Assinatura Eletrônica</h3>
+                <h3 className="text-md font-black uppercase tracking-tight text-slate-900 border-none">Configuração de Assinatura Eletrônica</h3>
                 <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">
-                  Cadastre ou mude sua assinatura manuscrita que chancela visualmente os relatórios.
+                  Mude seus dados e sua chave de autenticação (letras e números) de validade jurídica.
                 </p>
               </div>
-              {config.savedSignature && (
-                <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-50 border-2 border-emerald-900 px-2 py-0.5 rounded-none">
-                  Assinatura Gravada
-                </span>
-              )}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-              {/* Canvas area */}
-              <div className="space-y-2">
-                <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 block">Assine abaixo com o mouse ou o dedo:</span>
-                <div className="bg-slate-50 border-2 border-dashed border-slate-400 rounded-none overflow-hidden relative flex justify-center items-center">
-                  <canvas
-                    ref={canvasRef}
-                    width={280}
-                    height={150}
-                    className="cursor-crosshair bg-slate-50 touch-none block"
-                    onMouseDown={startDrawing}
-                    onMouseMove={draw}
-                    onMouseUp={stopDrawing}
-                    onMouseLeave={stopDrawing}
-                    onTouchStart={startDrawing}
-                    onTouchMove={draw}
-                    onTouchEnd={stopDrawing}
+            <form onSubmit={handleSaveSettings} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-800">Nome do Coordenador</label>
+                  <input
+                    type="text"
+                    required
+                    value={editName}
+                    onChange={e => setEditName(e.target.value)}
+                    className="px-3 py-2 text-xs border-2 border-slate-200 focus:border-odonto-navy rounded-none font-bold text-slate-800 bg-slate-50 focus:bg-white"
                   />
-                  {!hasDrawn && (
-                    <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center opacity-40 text-slate-400 gap-1">
-                      <PenTool className="w-6 h-6" />
-                      <span className="text-xs font-medium">Espaço para Assinatura</span>
-                    </div>
-                  )}
                 </div>
-                <div className="flex justify-between items-center">
-                  <button
-                    onClick={clearCanvas}
-                    className="text-[10px] text-rose-600 hover:underline font-black uppercase tracking-wider"
-                  >
-                    Limpar Tela
-                  </button>
-                  <button
-                    onClick={saveSignature}
-                    disabled={!hasDrawn}
-                    className="bg-slate-900 hover:bg-black text-white font-black text-xs uppercase tracking-widest px-4 py-2 rounded-none disabled:opacity-40 transition"
-                  >
-                    Salvar Assinatura
-                  </button>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-800">Cargo Oficial</label>
+                  <input
+                    type="text"
+                    required
+                    value={editTitle}
+                    onChange={e => setEditTitle(e.target.value)}
+                    className="px-3 py-2 text-xs border-2 border-slate-200 focus:border-odonto-navy rounded-none font-bold text-slate-800 bg-slate-50 focus:bg-white"
+                  />
                 </div>
               </div>
 
-              {/* Preview block */}
-              <div className="flex flex-col items-center justify-center p-4 border-2 border-dashed border-slate-300 bg-white rounded-none h-[190px]">
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Carimbo de Chancela Digital Unimeta</span>
-                {config.savedSignature ? (
-                  <div className="border-2 border-slate-900 bg-slate-50 p-3 rounded-none text-center relative max-w-sm overflow-hidden">
-                    <img
-                      src={config.savedSignature}
-                      alt="Assinatura salva"
-                      className="max-h-20 max-w-full object-contain mx-auto"
-                      referrerPolicy="no-referrer"
-                    />
-                    <div className="border-t border-dashed border-slate-400 pt-2 mt-2 text-[8px] text-slate-900 leading-none uppercase font-bold tracking-wide">
-                      <p className="font-black">{config.name}</p>
-                      <p className="opacity-75">{config.title}</p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-center text-slate-400 text-[10px] uppercase tracking-wider font-extrabold py-4">
-                    <Compass className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                    Sem assinatura manual cadastrada.
-                  </div>
-                )}
+              <div className="bg-slate-50 p-4 border-2 border-dashed border-odonto-navy space-y-3">
+                <div className="flex justify-between items-center">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-900 flex items-center gap-1">
+                    <KeyRound className="w-3.5 h-3.5 text-odonto-gold" /> Chave Alfanumérica de Chancela
+                  </label>
+                  <button
+                    type="button"
+                    onClick={generateRandomKey}
+                    className="text-[10px] text-odonto-navy hover:underline font-black uppercase tracking-wider flex items-center gap-1 cursor-pointer"
+                  >
+                    Gerar Nova Chave 🎲
+                  </button>
+                </div>
+                
+                <p className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide">
+                  Esta chave de letras e números substitui sua assinatura manual física e é aplicada nas certidões dos termos com validade acadêmica.
+                </p>
+
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    required
+                    maxLength={25}
+                    placeholder="Ex: ODONTO-COORD-7A8B"
+                    value={editSignatureKey}
+                    onChange={e => setEditSignatureKey(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ''))}
+                    className="flex-1 px-4 py-2 text-sm border-2 border-slate-300 focus:border-odonto-navy rounded-none uppercase font-mono font-black text-blue-900 bg-white"
+                  />
+                </div>
               </div>
-            </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowSettings(false)}
+                  className="px-4 py-2 border-2 border-slate-200 hover:bg-slate-100 text-slate-500 font-black text-xs uppercase tracking-widest rounded-none cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="bg-odonto-navy hover:bg-black text-white font-black text-xs uppercase tracking-widest px-5 py-2 rounded-none transition shadow border-2 border-odonto-navy cursor-pointer"
+                >
+                  Salvar Alterações
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

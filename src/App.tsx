@@ -13,8 +13,14 @@ export default function App() {
   useEffect(() => {
     const handleHashRouter = () => {
       const hash = window.location.hash;
-      if (hash === "#validador") {
+      const params = new URLSearchParams(window.location.search);
+      const hasProtocol = params.has("protocolo") || params.has("id");
+
+      if (hash === "#validador" || hasProtocol) {
         setRoute("validador");
+        if (window.location.hash !== "#validador") {
+          window.location.hash = "validador";
+        }
       } else if (hash === "#coordenador") {
         setRoute("coordenador");
       } else {

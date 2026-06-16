@@ -27,13 +27,15 @@ export interface InternshipDocument {
   coordinatorName?: string;
   coordinatorSignatureText?: string; // Electronic signature certificate text
   signatureHash?: string; // Digital seal hash linking coordinator + fileHash
-  signaturePng?: string; // Base64 signature sketch drawn by coordinator
+  signaturePng?: string; // Base64 signature sketch drawn by coordinator (deprecated optional fallback)
+  signatureKey?: string; // Electronic signature key (letters and numbers)
 }
 
 export interface CoordinatorConfig {
   name: string;
   title: string; // Ex: Coordenador de Odontologia
   institution: string; // Centro Universitário Estácio Unimeta
-  savedSignature?: string; // Base64 drawing
+  savedSignature?: string; // Base64 drawing (deprecated optional fallback)
   accessCode: string; // Security code of coordinator
+  signatureKey?: string; // Electronic signature key (letters and numbers)
 }
