@@ -1,0 +1,6 @@
+{
+  "name": "Assinador Unimeta",
+  "description": "Plataforma de assinatura e validação de termos de estágio para coordenação de Odontologia - Estácio Unimeta.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

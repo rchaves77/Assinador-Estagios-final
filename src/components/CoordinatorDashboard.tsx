@@ -1,0 +1,893 @@
+import React, { useState, useEffect, useRef } from "react";
+import { db } from "../firebase";
+import { doc, getDoc, setDoc, updateDoc, collection, query, getDocs } from "firebase/firestore";
+import { DocumentStatus, InternshipDocument, CoordinatorConfig } from "../types";
+import { generateSignatureHash } from "../utils/crypto";
+import DocumentViewer from "./DocumentViewer";
+import { 
+  KeyRound, ShieldCheck, PenTool, CheckCircle2, XCircle, 
+  Settings2, Eye, Compass, LogOut, Check, ChevronRight, 
+  Trash2, FileCheck, CircleSlash, RefreshCw, Star, Info
+} from "lucide-react";
+
+export default function CoordinatorDashboard() {
+  const [loading, setLoading] = useState(true);
+  const [config, setConfig] = useState<CoordinatorConfig | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [passcodeInput, setPasscodeInput] = useState("");
+  const [loginError, setLoginError] = useState("");
+
+  // Onboarding Setup Form
+  const [setupForm, setSetupForm] = useState({
+    name: "",
+    title: "Coordenador(a) de Curso de Odontologia",
+    institution: "Centro Universitário Estácio Unimeta",
+    accessCode: ""
+  });
+
+  // Main Dashboard states
+  const [documents, setDocuments] = useState<InternshipDocument[]>([]);
+  const [filter, setFilter] = useState<DocumentStatus | "TODOS">("TODOS");
+  const [selectedDoc, setSelectedDoc] = useState<InternshipDocument | null>(null);
+  const [rejectionFeedback, setRejectionFeedback] = useState("");
+  const [actionLoading, setActionLoading] = useState(false);
+
+  // Signature Canvas state
+  const [isDrawing, setIsDrawing] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [hasDrawn, setHasDrawn] = useState(false);
+
+  // Settings pane
+  const [showSettings, setShowSettings] = useState(false);
+
+  // Check coordinator profile existence on Mount
+  useEffect(() => {
+    fetchCoordinatorConfig();
+  }, []);
+
+  const fetchCoordinatorConfig = async () => {
+    setLoading(true);
+    try {
+      const configDoc = await getDoc(doc(db, "config", "coordinator"));
+      if (configDoc.exists()) {
+        setConfig(configDoc.data() as CoordinatorConfig);
+      }
+    } catch (err) {
+      console.error("Error reading coordinator profile", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadDocuments = async () => {
+    try {
+      const querySnapshot = await getDocs(collection(db, "documents"));
+      const docList: InternshipDocument[] = [];
+      querySnapshot.forEach(snap => {
+        docList.push(snap.data() as InternshipDocument);
+      });
+      // Sort oldest to newest for pending review queue
+      docList.sort((a, b) => b.createdAt - a.createdAt);
+      setDocuments(docList);
+    } catch (err) {
+      console.error("Erro ao carregar documentos", err);
+    }
+  };
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadDocuments();
+    }
+  }, [isAuthenticated]);
+
+  // Passcode verification
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError("");
+
+    if (!config) return;
+
+    if (passcodeInput.trim() === config.accessCode) {
+      setIsAuthenticated(true);
+      setPasscodeInput("");
+    } else {
+      setLoginError("Código de acesso incorreto. Verifique com cuidado.");
+    }
+  };
+
+  // Onboarding submit
+  const handleSetupSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!setupForm.name || !setupForm.accessCode) {
+      alert("Preencha todos os campos e o código de acesso de segurança.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const newConfig: CoordinatorConfig = {
+        name: setupForm.name.trim(),
+        title: setupForm.title.trim(),
+        institution: setupForm.institution.trim(),
+        accessCode: setupForm.accessCode.trim()
+      };
+
+      await setDoc(doc(db, "config", "coordinator"), newConfig);
+      setConfig(newConfig);
+      setIsAuthenticated(true); // Auto logs in
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao salvar configuração inicial. Tente novamente.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // --- Drawing Signature Logic ---
+  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.strokeStyle = "#1e3a8a"; // Deep navy blue ink
+    ctx.lineWidth = 3.5;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    let clientX, clientY;
+    if ("touches" in e) {
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    ctx.beginPath();
+    ctx.moveTo(clientX - rect.left, clientY - rect.top);
+    setIsDrawing(true);
+  };
+
+  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    if (!isDrawing) return; e.preventDefault();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    let clientX, clientY;
+    if ("touches" in e) {
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    ctx.lineTo(clientX - rect.left, clientY - rect.top);
+    ctx.stroke();
+    setHasDrawn(true);
+  };
+
+  const stopDrawing = () => {
+    setIsDrawing(false);
+  };
+
+  const clearCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    setHasDrawn(false);
+  };
+
+  const saveSignature = async () => {
+    const canvas = canvasRef.current;
+    if (!canvas || !config || !hasDrawn) return;
+
+    const signaturePng = canvas.toDataURL("image/png");
+    
+    setLoading(true);
+    try {
+      const updatedConfig = { ...config, savedSignature: signaturePng };
+      await updateDoc(doc(db, "config", "coordinator"), { savedSignature: signaturePng });
+      setConfig(updatedConfig);
+      alert("Sua assinatura manual foi digitalizada e salva no seu perfil com segurança!");
+      setShowSettings(false);
+    } catch (err) {
+      console.error("Signature save error", err);
+      alert("Erro ao persistir assinatura.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // --- Coordinator Decision Logic ---
+
+  const handleApprove = async () => {
+    if (!selectedDoc || !config) return;
+    if (!config.savedSignature) {
+      alert("Atenção: Você precisa cadastrar sua assinatura manual antes de chancelar termos! Acesse a aba Configurações de Assinatura acima.");
+      return;
+    }
+
+    setActionLoading(true);
+    try {
+      const timestamp = Date.now();
+      const documentHash = selectedDoc.fileHash;
+      
+      // Calculate secure digital seal hash linking coordinator + doc hash + unique timestamp keys
+      const sHash = await generateSignatureHash(documentHash, config.name, timestamp);
+
+      const updatedFields = {
+        status: DocumentStatus.APPROVED,
+        reviewedAt: timestamp,
+        coordinatorName: config.name,
+        coordinatorSignatureText: `${config.title} - Assinado eletronicamente via Sistema Estácio Unimeta.`,
+        signatureHash: sHash,
+        signaturePng: config.savedSignature
+      };
+
+      await updateDoc(doc(db, "documents", selectedDoc.id), updatedFields);
+
+      // Save locally
+      const updatedList = documents.map(docItem => {
+        if (docItem.id === selectedDoc.id) {
+          return { ...docItem, ...updatedFields };
+        }
+        return docItem;
+      });
+
+      setDocuments(updatedList);
+      setSelectedDoc(prev => (prev ? { ...prev, ...updatedFields } : null));
+      alert("Termo avaliado e assinado eletronicamente! Protocolo com selo liberado para o aluno.");
+    } catch (err) {
+      console.error(err);
+      alert("Falha ao assinar. Tente novamente.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleReject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedDoc || !rejectionFeedback.trim()) return;
+
+    setActionLoading(true);
+    try {
+      const timestamp = Date.now();
+      const updatedFields = {
+        status: DocumentStatus.REJECTED,
+        reviewedAt: timestamp,
+        coordinatorFeedback: rejectionFeedback.trim()
+      };
+
+      await updateDoc(doc(db, "documents", selectedDoc.id), updatedFields);
+
+      const updatedList = documents.map(docItem => {
+        if (docItem.id === selectedDoc.id) {
+          return { ...docItem, ...updatedFields };
+        }
+        return docItem;
+      });
+
+      setDocuments(updatedList);
+      setSelectedDoc(prev => (prev ? { ...prev, ...updatedFields } : null));
+      setRejectionFeedback("");
+      alert("Termo rejeitado com sucesso. O feedback foi reportado ao aluno.");
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const filteredDocs = documents.filter(docItem => {
+    if (filter === "TODOS") return true;
+    return docItem.status === filter;
+  });
+
+  const getStatusCount = (status: DocumentStatus) => {
+    return documents.filter(docItem => docItem.status === status).length;
+  };
+
+  // Reset/Onboarding Setup View
+  if (loading && !config) {
+    return (
+      <div className="flex justify-center items-center h-[60vh]">
+        <div className="animate-spin rounded-none h-10 w-10 border-4 border-slate-200 border-t-slate-900"></div>
+      </div>
+    );
+  }
+
+  // --- VIEW 1: FIRST TIME SETUP ONBOARDING ---
+  if (!config) {
+    return (
+      <div className="max-w-xl mx-auto py-12 px-4" id="coordinator-onboarding">
+        <div className="bg-white rounded-none shadow-2xl border-2 border-slate-900 overflow-hidden">
+          <div className="bg-slate-900 text-white p-8 text-center relative">
+            <span className="bg-slate-800 text-white text-[10px] font-black px-3 py-1 rounded-none uppercase tracking-widest block w-max mx-auto mb-3 border border-slate-700">
+              Primeiro Acesso
+            </span>
+            <h1 className="text-2xl font-black uppercase tracking-tight border-none">Painel da Coordenação</h1>
+            <p className="text-slate-300 text-xs mt-2 max-w-sm mx-auto font-medium">
+              Configure seu perfil oficial de assinatura uma vez para habilitar a chancela digital de termos de estágio.
+            </p>
+          </div>
+
+          <form onSubmit={handleSetupSubmit} className="p-6 space-y-6" id="onboarding-setup-form">
+            <div className="space-y-4">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-black uppercase tracking-wider text-slate-800">Nome Oficial do Coordenador</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: Prof. Dr. Rômulo Chaves"
+                  value={setupForm.name}
+                  onChange={e => setSetupForm({ ...setupForm, name: e.target.value })}
+                  className="px-4 py-2.5 text-sm border-2 border-slate-200 focus:border-slate-900 rounded-none bg-slate-50 focus:bg-white font-bold text-slate-800 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-black uppercase tracking-wider text-slate-800">Cargo Oficial</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: Coordenador do Curso de Odontologia"
+                  value={setupForm.title}
+                  onChange={e => setSetupForm({ ...setupForm, title: e.target.value })}
+                  className="px-4 py-2.5 text-sm border-2 border-slate-200 focus:border-slate-900 rounded-none bg-slate-50 focus:bg-white font-bold text-slate-800 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-black uppercase tracking-wider text-slate-800">Instituição de Ensino</label>
+                <input
+                  type="text"
+                  required
+                  value={setupForm.institution}
+                  onChange={e => setSetupForm({ ...setupForm, institution: e.target.value })}
+                  className="px-4 py-2.5 text-sm border-2 border-slate-200 focus:border-slate-900 rounded-none bg-slate-100 font-bold text-slate-600 focus:outline-none"
+                  readOnly
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5 bg-slate-50 p-4 rounded-none border-2 border-slate-900">
+                <label className="text-xs font-black uppercase tracking-widest text-slate-900 flex items-center gap-1">
+                  <KeyRound className="w-4 h-4 text-slate-900" /> Criar Código de Acesso (Senha)
+                </label>
+                <p className="text-[10px] text-slate-500 font-semibold mb-2">
+                  Esta senha será solicitada sempre que você abrir este painel administrativo para avaliar os termos.
+                </p>
+                <input
+                  type="password"
+                  required
+                  placeholder="Defina uma senha administrativa"
+                  value={setupForm.accessCode}
+                  onChange={e => setSetupForm({ ...setupForm, accessCode: e.target.value })}
+                  className="px-4 py-2.5 text-sm border-2 border-slate-200 focus:border-slate-900 rounded-none font-bold text-slate-800 bg-white focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-slate-900 hover:bg-black text-white font-black text-xs uppercase tracking-widest py-3.5 px-4 rounded-none shadow transition"
+              id="btn-onboarding-submit"
+            >
+              Setar Perfil da Coordenação
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // --- VIEW 2: LOGIN SECURITY SCREEN ---
+  if (!isAuthenticated) {
+    return (
+      <div className="max-w-md mx-auto py-16 px-4" id="coordinator-login">
+        <div className="bg-white rounded-none shadow-2xl border-2 border-odonto-navy overflow-hidden p-8 text-center space-y-6">
+          <div className="w-16 h-16 bg-slate-50 text-odonto-navy rounded-none border-2 border-odonto-navy flex items-center justify-center mx-auto shadow-md">
+            <KeyRound className="w-8 h-8 text-odonto-gold animate-pulse" />
+          </div>
+
+          <div className="space-y-1">
+            <h1 className="text-xl font-black uppercase tracking-tight text-odonto-navy border-none">Acesso Restrito Coordenador</h1>
+            <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">
+              Olá, <strong>{config.name}</strong>. Insira sua chave de acesso acadêmica da Odontologia Estácio Unimeta.
+            </p>
+          </div>
+
+          {loginError && (
+            <div className="bg-rose-50 border-2 border-rose-950 text-rose-900 text-xs p-3 rounded-none font-bold uppercase tracking-wide">
+              {loginError}
+            </div>
+          )}
+
+          <form onSubmit={handleLogin} className="space-y-4" id="coordinator-login-form">
+            <input
+              type="password"
+              placeholder="Digite o código de acesso"
+              value={passcodeInput}
+              onChange={e => setPasscodeInput(e.target.value)}
+              className="w-full px-4 py-3 border-2 border-slate-200 rounded-none bg-slate-50 focus:bg-white focus:border-odonto-navy text-center font-extrabold tracking-widest text-lg focus:outline-none focus:ring-1 focus:ring-odonto-navy"
+              autoFocus
+            />
+
+            <button
+              type="submit"
+              className="w-full bg-odonto-navy hover:bg-black text-white font-black text-xs uppercase tracking-widest py-3.5 px-4 rounded-none shadow transition border-2 border-odonto-navy duration-200"
+              id="btn-login"
+            >
+              Entrar no Painel
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // --- VIEW 3: MAIN ADMINISTRATIVE DASHBOARD ---
+  return (
+    <div className="w-full max-w-7xl mx-auto py-8 px-4 space-y-8" id="admin-dashboard">
+      
+      {/* Upper Navigation and Header info */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-none border-2 border-odonto-navy shadow-xl">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-odonto-navy text-white rounded-none flex items-center justify-center font-black uppercase text-xs border border-odonto-gold">
+            Od
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-sm font-black uppercase tracking-tight text-odonto-navy border-none leading-none m-0 p-0">
+                {config.name}
+              </h1>
+              <span className="bg-odonto-navy text-white text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-none border border-odonto-gold">
+                Ativo
+              </span>
+            </div>
+            <p className="text-[10px] text-slate-500 font-extrabold uppercase tracking-wide mt-1">
+              {config.title} • {config.institution}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 self-stretch md:self-auto justify-end">
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className={`flex items-center gap-1.5 text-xs font-black uppercase tracking-widest px-4 py-2.5 rounded-none border-2 transition ${
+              showSettings 
+                ? "bg-odonto-navy border-odonto-navy text-white shadow-md cursor-pointer" 
+                : "bg-white border-odonto-navy text-odonto-navy hover:bg-slate-50 cursor-pointer"
+            }`}
+            id="settings-toggle-btn"
+          >
+            <PenTool className="w-4 h-4 text-odonto-gold" /> Assinatura Digital Manual
+          </button>
+          
+          <button
+            onClick={() => {
+              setIsAuthenticated(false);
+              setSelectedDoc(null);
+              setShowSettings(false);
+            }}
+            className="flex items-center justify-center p-2.5 text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-none border-2 border-transparent hover:border-rose-300 transition cursor-pointer"
+            title="Sair do Sistema"
+            id="logout-btn"
+          >
+            <LogOut className="w-5 h-5" />
+          </button>
+        </div>
+      </div>
+
+      {/* Settings Signature DrawPad drawer */}
+      {showSettings && (
+        <div className="bg-white border-2 border-odonto-navy rounded-none p-6 relative shadow-xl" id="drawpad-modal">
+          <div className="max-w-xl mx-auto space-y-4">
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="text-md font-black uppercase tracking-tight text-slate-900">Configuração de Assinatura Eletrônica</h3>
+                <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">
+                  Cadastre ou mude sua assinatura manuscrita que chancela visualmente os relatórios.
+                </p>
+              </div>
+              {config.savedSignature && (
+                <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-50 border-2 border-emerald-900 px-2 py-0.5 rounded-none">
+                  Assinatura Gravada
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+              {/* Canvas area */}
+              <div className="space-y-2">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 block">Assine abaixo com o mouse ou o dedo:</span>
+                <div className="bg-slate-50 border-2 border-dashed border-slate-400 rounded-none overflow-hidden relative flex justify-center items-center">
+                  <canvas
+                    ref={canvasRef}
+                    width={280}
+                    height={150}
+                    className="cursor-crosshair bg-slate-50 touch-none block"
+                    onMouseDown={startDrawing}
+                    onMouseMove={draw}
+                    onMouseUp={stopDrawing}
+                    onMouseLeave={stopDrawing}
+                    onTouchStart={startDrawing}
+                    onTouchMove={draw}
+                    onTouchEnd={stopDrawing}
+                  />
+                  {!hasDrawn && (
+                    <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center opacity-40 text-slate-400 gap-1">
+                      <PenTool className="w-6 h-6" />
+                      <span className="text-xs font-medium">Espaço para Assinatura</span>
+                    </div>
+                  )}
+                </div>
+                <div className="flex justify-between items-center">
+                  <button
+                    onClick={clearCanvas}
+                    className="text-[10px] text-rose-600 hover:underline font-black uppercase tracking-wider"
+                  >
+                    Limpar Tela
+                  </button>
+                  <button
+                    onClick={saveSignature}
+                    disabled={!hasDrawn}
+                    className="bg-slate-900 hover:bg-black text-white font-black text-xs uppercase tracking-widest px-4 py-2 rounded-none disabled:opacity-40 transition"
+                  >
+                    Salvar Assinatura
+                  </button>
+                </div>
+              </div>
+
+              {/* Preview block */}
+              <div className="flex flex-col items-center justify-center p-4 border-2 border-dashed border-slate-300 bg-white rounded-none h-[190px]">
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Carimbo de Chancela Digital Unimeta</span>
+                {config.savedSignature ? (
+                  <div className="border-2 border-slate-900 bg-slate-50 p-3 rounded-none text-center relative max-w-sm overflow-hidden">
+                    <img
+                      src={config.savedSignature}
+                      alt="Assinatura salva"
+                      className="max-h-20 max-w-full object-contain mx-auto"
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="border-t border-dashed border-slate-400 pt-2 mt-2 text-[8px] text-slate-900 leading-none uppercase font-bold tracking-wide">
+                      <p className="font-black">{config.name}</p>
+                      <p className="opacity-75">{config.title}</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center text-slate-400 text-[10px] uppercase tracking-wider font-extrabold py-4">
+                    <Compass className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                    Sem assinatura manual cadastrada.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Counters & Filter Section */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4" id="stats-panel">
+        <button
+          onClick={() => { setFilter("TODOS"); setSelectedDoc(null); }}
+          className={`p-4 rounded-none border-2 text-left shadow-xl transition cursor-pointer ${
+            filter === "TODOS" 
+              ? "bg-odonto-navy border-odonto-navy text-white font-extrabold" 
+              : "bg-white border-odonto-navy hover:bg-slate-50 text-slate-900"
+          }`}
+        >
+          <span className="text-[10px] uppercase tracking-wider font-black block text-odonto-gold">Total Coletados</span>
+          <span className="text-2xl font-black mt-1 block">{documents.length}</span>
+        </button>
+
+        <button
+          onClick={() => { setFilter(DocumentStatus.PENDING); setSelectedDoc(null); }}
+          className={`p-4 rounded-none border-2 text-left shadow-xl transition cursor-pointer ${
+            filter === DocumentStatus.PENDING 
+              ? "bg-amber-400 border-odonto-navy text-slate-950 font-black" 
+              : "bg-white border-odonto-navy hover:bg-slate-50 text-slate-900"
+          }`}
+        >
+          <span className="text-[10px] uppercase tracking-wider font-black block">Fila Pendente</span>
+          <span className="text-2xl font-black mt-1 block">{getStatusCount(DocumentStatus.PENDING)}</span>
+        </button>
+
+        <button
+          onClick={() => { setFilter(DocumentStatus.APPROVED); setSelectedDoc(null); }}
+          className={`p-4 rounded-none border-2 text-left shadow-xl transition cursor-pointer ${
+            filter === DocumentStatus.APPROVED 
+              ? "bg-odonto-navy border-odonto-navy text-white font-extrabold" 
+              : "bg-white border-odonto-navy hover:bg-slate-50 text-slate-900"
+          }`}
+        >
+          <span className="text-[10px] uppercase tracking-wider font-black block text-emerald-400">Chancelados (Assinados)</span>
+          <span className="text-2xl font-black mt-1 block">{getStatusCount(DocumentStatus.APPROVED)}</span>
+        </button>
+
+        <button
+          onClick={() => { setFilter(DocumentStatus.REJECTED); setSelectedDoc(null); }}
+          className={`p-4 rounded-none border-2 text-left shadow-xl transition cursor-pointer ${
+            filter === DocumentStatus.REJECTED 
+              ? "bg-rose-600 border-odonto-navy text-white font-extrabold" 
+              : "bg-white border-odonto-navy hover:bg-slate-50 text-slate-900"
+          }`}
+        >
+          <span className="text-[10px] uppercase tracking-wider font-black block">Recusados</span>
+          <span className="text-2xl font-black mt-1 block">{getStatusCount(DocumentStatus.REJECTED)}</span>
+        </button>
+      </div>
+
+      {/* Main workspace layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        
+        {/* Left Side: Termos List queue */}
+        <div className="lg:col-span-4 space-y-4" id="documents-list-sidebar">
+          <div className="flex justify-between items-center">
+            <h2 className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+              Termos {filter} Encontrados ({filteredDocs.length})
+            </h2>
+            <button
+              onClick={loadDocuments}
+              className="text-xs text-slate-900 hover:opacity-80 flex items-center gap-1 font-black uppercase tracking-wider"
+            >
+              <RefreshCw className="w-3.5 h-3.5" /> Atualizar Banco
+            </button>
+          </div>
+
+          <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
+            {filteredDocs.length === 0 ? (
+              <div className="bg-white rounded-none p-8 border-2 border-odonto-navy text-center text-slate-400">
+                <CircleSlash className="w-8 h-8 rounded-none border border-slate-300 p-1 mx-auto mb-2" />
+                <p className="text-xs font-black uppercase tracking-wider text-slate-500">Sem registros encontrados.</p>
+              </div>
+            ) : (
+              filteredDocs.map(docItem => (
+                <div
+                  key={docItem.id}
+                  onClick={() => {
+                    setSelectedDoc(docItem);
+                    setRejectionFeedback("");
+                  }}
+                  className={`p-4 rounded-none border-2 text-left cursor-pointer transition relative overflow-hidden ${
+                    selectedDoc?.id === docItem.id
+                      ? "bg-odonto-navy text-white border-odonto-navy shadow-xl"
+                      : "bg-white border-odonto-navy hover:bg-slate-50 text-slate-900"
+                  }`}
+                >
+                  <div className="flex justify-between items-start gap-1 pb-1">
+                    <span className={`text-[10px] font-mono font-bold ${
+                      selectedDoc?.id === docItem.id ? "text-slate-200" : "text-slate-400"
+                    }`}>
+                      {docItem.id}
+                    </span>
+                    <span className={`text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-none ${
+                      docItem.status === DocumentStatus.APPROVED
+                        ? "bg-emerald-600 text-white"
+                        : docItem.status === DocumentStatus.REJECTED
+                        ? "bg-rose-600 text-white"
+                        : "bg-amber-400 text-amber-950 font-black"
+                    }`}>
+                      {docItem.status}
+                    </span>
+                  </div>
+
+                  <h3 className="text-xs font-black uppercase tracking-tight truncate leading-snug">
+                    {docItem.studentName}
+                  </h3>
+                  <p className={`text-[10px] uppercase font-bold truncate tracking-wider ${selectedDoc?.id === docItem.id ? "text-odonto-gold" : "text-slate-500"}`}>
+                    Matrícula: {docItem.studentRegistration}
+                  </p>
+
+                  <div className="flex justify-between items-center border-t border-current border-opacity-10 pt-2 mt-2 text-[9px] uppercase font-bold tracking-wider opacity-85">
+                    <span>{docItem.studentPeriod}</span>
+                    <span className="truncate max-w-[120px]">{docItem.studentEmail}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Right Side: Document evaluation focus workspace */}
+        <div className="lg:col-span-8" id="document-evaluation-workspace">
+          {selectedDoc ? (
+            <div className="bg-white rounded-none border-2 border-odonto-navy shadow-2xl overflow-hidden p-6 md:p-8 space-y-6">
+              
+              {/* Document Header Metadata */}
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b-2 border-odonto-navy pb-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-mono font-bold text-slate-400">
+                      ID: {selectedDoc.id}
+                    </span>
+                    {selectedDoc.status === DocumentStatus.APPROVED && (
+                      <span className="flex items-center gap-1 bg-emerald-600 text-white font-black uppercase tracking-widest text-[9px] px-2 py-0.5 rounded-none border border-emerald-700">
+                        <FileCheck className="w-3.5 h-3.5 text-white" /> CHANCELADO
+                      </span>
+                    )}
+                  </div>
+                  <h2 className="text-xl font-black uppercase tracking-tight text-odonto-navy leading-tight">
+                    Avaliação: {selectedDoc.studentName}
+                  </h2>
+                  <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">
+                    Matrícula: {selectedDoc.studentRegistration} • {selectedDoc.studentPeriod}
+                  </p>
+                </div>
+
+                <div className="text-xs text-slate-400 text-right font-bold uppercase tracking-wider">
+                  <p>Enviado em:</p>
+                  <span className="font-extrabold text-slate-900">
+                    {new Date(selectedDoc.createdAt).toLocaleDateString("pt-BR")}
+                  </span>
+                </div>
+              </div>
+
+              {/* Side-by-Side: Document file + detail sheet */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                
+                {/* Visualizer (2/3 space) */}
+                <div className="md:col-span-2">
+                  <DocumentViewer
+                    fileUrl={selectedDoc.fileUrl}
+                    fileType={selectedDoc.fileType}
+                    fileName={selectedDoc.fileName}
+                  />
+                </div>
+
+                {/* Details validation sheet form (1/3 space) */}
+                <div className="space-y-6">
+                  <div className="bg-slate-50 rounded-none p-4 border-2 border-odonto-navy space-y-3.5">
+                    <h3 className="text-[10px] font-black text-odonto-navy uppercase tracking-widest">
+                      Ficha de Identificação
+                    </h3>
+
+                    <div className="space-y-2">
+                      <div>
+                        <span className="text-[10px] text-slate-400 uppercase block font-black">Aluno</span>
+                        <span className="text-xs text-slate-900 font-extrabold uppercase tracking-wide">{selectedDoc.studentName}</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-300">
+                        <div>
+                          <span className="text-[10px] text-slate-400 uppercase block font-black">Matrícula</span>
+                          <span className="text-xs text-slate-900 font-extrabold uppercase">{selectedDoc.studentRegistration}</span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 uppercase block font-black">Período</span>
+                          <span className="text-xs text-slate-900 font-extrabold uppercase">{selectedDoc.studentPeriod}</span>
+                        </div>
+                      </div>
+                      <div className="pt-2 border-t border-slate-300">
+                        <span className="text-[10px] text-slate-400 uppercase block font-black">E-mail para Notificação</span>
+                        <span className="text-xs text-slate-900 font-extrabold break-all">{selectedDoc.studentEmail}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-odonto-navy text-white rounded-none p-4 border-2 border-odonto-navy space-y-2 shadow-lg">
+                    <h4 className="text-[10px] font-black text-odonto-gold flex items-center gap-1 uppercase tracking-widest">
+                      <ShieldCheck className="w-4 h-4 text-odonto-gold" /> Integridade Cripto
+                    </h4>
+                    <p className="text-[10px] text-slate-300 leading-snug font-medium uppercase tracking-wide">
+                      O arquivo enviado possui uma assinatura hash para validação em caso de alteração de conteúdo.
+                    </p>
+                    <div className="text-[9px] font-mono select-all bg-black/20 border border-white/20 p-1.5 rounded-none text-white truncate font-bold" title={selectedDoc.fileHash}>
+                      SHA256: {selectedDoc.fileHash}
+                    </div>
+                  </div>
+
+                  {/* Actions area based on status */}
+                  {selectedDoc.status === DocumentStatus.PENDING ? (
+                    <div className="space-y-4">
+                      {/* Approve button */}
+                      <button
+                        onClick={handleApprove}
+                        disabled={actionLoading}
+                        className="w-full bg-odonto-navy hover:bg-black text-white font-black text-xs uppercase tracking-widest py-3.5 px-4 rounded-none shadow transition flex items-center justify-center gap-2 border-2 border-odonto-navy duration-200 cursor-pointer"
+                        id="approve-btn"
+                      >
+                        <CheckCircle2 className="w-5 h-5 text-odonto-gold" /> {actionLoading ? "Chancelando..." : "Aprovar & Assinar Digitalmente"}
+                      </button>
+
+                      <div className="border-t-2 border-odonto-navy pt-4">
+                        {/* Reject Form */}
+                        <form onSubmit={handleReject} className="space-y-2">
+                          <label className="text-[10px] font-black uppercase tracking-wider text-slate-700">Rejeitar com feedback:</label>
+                          <textarea
+                            placeholder="Descreva o que o aluno precisa corrigir. Ex: Data do termo diverge da concedente."
+                            required
+                            rows={3}
+                            value={rejectionFeedback}
+                            onChange={e => setRejectionFeedback(e.target.value)}
+                            className="w-full p-2.5 text-xs border-2 border-slate-200 focus:border-odonto-navy rounded-none bg-slate-50 focus:bg-white font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-odonto-navy"
+                          />
+                          <button
+                            type="submit"
+                            disabled={actionLoading || !rejectionFeedback.trim()}
+                            className="w-full bg-rose-600 hover:bg-rose-700 text-white font-black text-xs uppercase tracking-widest py-3.5 px-3 rounded-none shadow transition border-2 border-rose-600 cursor-pointer"
+                            id="reject-btn"
+                          >
+                            Recusar Termo
+                          </button>
+                        </form>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-slate-50 rounded-none p-4 border-2 border-odonto-navy text-center space-y-2 shadow-md">
+                      <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest block">
+                        Ação Concluída
+                      </span>
+                      <p className="text-xs text-slate-800 font-bold uppercase tracking-wide">
+                        {selectedDoc.status === DocumentStatus.APPROVED
+                          ? `Aprovado por coordenação.`
+                          : "Rejeitado com feedback enviado."
+                        }
+                      </p>
+                      
+                      {selectedDoc.status === DocumentStatus.REJECTED && (
+                        <div className="bg-white border-2 border-slate-200 p-2.5 rounded-none text-left text-[10px] text-slate-500 mt-2 font-bold uppercase tracking-wider">
+                          <strong>Feedback:</strong> {selectedDoc.coordinatorFeedback}
+                        </div>
+                      )}
+
+                      {/* Let Coordinator set pending again if made a mistake */}
+                      <button
+                        onClick={async () => {
+                          if (confirm("Resetar este termo para pendente novamente?")) {
+                            setLoading(true);
+                            try {
+                              const docRef = doc(db, "documents", selectedDoc.id);
+                              await updateDoc(docRef, {
+                                status: DocumentStatus.PENDING,
+                                coordinatorFeedback: "",
+                                coordinatorSignatureText: "",
+                                signatureHash: ""
+                              });
+                              alert("Documento redefinido para pendente!");
+                              await loadDocuments();
+                              setSelectedDoc(null);
+                            } catch (e) {
+                              console.error(e);
+                            } finally {
+                              setLoading(false);
+                            }
+                          }
+                        }}
+                        className="text-[9px] text-rose-600 hover:text-rose-800 font-black uppercase tracking-widest block mx-auto pt-2 cursor-pointer"
+                      >
+                        Desfazer / Retornar Pendente
+                      </button>
+                    </div>
+                  )}
+
+                </div>
+
+              </div>
+
+            </div>
+          ) : (
+            <div className="bg-white border-2 border-odonto-navy rounded-none p-12 text-center text-slate-400 shadow-2xl min-h-[400px] flex flex-col justify-center items-center">
+              <Compass className="w-12 h-12 text-odonto-navy mb-3 animate-pulse" />
+              <h3 className="font-black uppercase tracking-tight text-odonto-navy text-sm">Nenhum Termo Selecionado</h3>
+              <p className="text-xs font-bold uppercase tracking-wider max-w-xs mt-3 leading-relaxed text-slate-500">
+                Escolha um dos termos listados na fila esquerda para conferir o PDF/imagem e proceder com a assinatura eletrônica.
+              </p>
+            </div>
+          )}
+        </div>
+
+      </div>
+
+    </div>
+  );
+}

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://raw.githubusercontent.com/ajv-validator/ajv/master/lib/refs/json-schema-draft-07.json",
+  "collections": [
+    {
+      "path": "config",
+      "documents": [
+        {
+          "id": "coordinator",
+          "fields": {
+            "name": "Prof. Dra. Clarissa Bastos",
+            "title": "Coordenadora do Curso de Odontologia",
+            "institution": "Centro Universitário Estácio Unimeta",
+            "accessCode": "1234"
+          }
+        }
+      ]
+    },
+    {
+      "path": "documents",
+      "documents": []
+    }
+  ]
+}
