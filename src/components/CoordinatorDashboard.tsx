@@ -796,6 +796,7 @@ export default function CoordinatorDashboard() {
                     fileUrl={resolvedFileUrl || selectedDoc.fileUrl}
                     fileType={selectedDoc.fileType}
                     fileName={selectedDoc.fileName}
+                    docData={selectedDoc}
                   />
                 </div>
 

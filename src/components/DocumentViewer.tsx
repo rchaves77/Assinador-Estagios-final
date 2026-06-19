@@ -1,49 +1,84 @@
 import { useState, useEffect } from "react";
 import { ZoomIn, ZoomOut, RotateCw, Download, FileText, ImageIcon, Eye } from "lucide-react";
+import { InternshipDocument } from "../types";
+import { generateSignedPdf } from "../utils/pdfSigner";
 
 interface DocumentViewerProps {
   fileUrl: string;
   fileType: string;
   fileName: string;
+  docData?: InternshipDocument | null;
 }
 
-export default function DocumentViewer({ fileUrl, fileType, fileName }: DocumentViewerProps) {
+function safeBase64ToBlobUrl(fileUrl: string, defaultType = "application/pdf"): string {
+  try {
+    const parts = fileUrl.split(";base64,");
+    const contentType = parts[0].split(":")[1] || defaultType;
+    const raw = parts[1] || parts[0];
+    
+    // Clean whitespaces, newlines, and retrieve only valid Base64 characters
+    const cleanRaw = raw.replace(/[^A-Za-z0-9+/=]/g, "");
+    
+    const byteCharacters = atob(cleanRaw);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    const blob = new Blob([byteArray], { type: contentType });
+    return URL.createObjectURL(blob);
+  } catch (err) {
+    console.error("Failed to decode base64 securely:", err);
+    return fileUrl;
+  }
+}
+
+export default function DocumentViewer({ fileUrl, fileType, fileName, docData }: DocumentViewerProps) {
   const [zoom, setZoom] = useState<number>(100);
   const [rotation, setRotation] = useState<number>(0);
   const [blobUrl, setBlobUrl] = useState<string>("");
+  const [processing, setProcessing] = useState<boolean>(false);
 
   const isPdf = fileType.includes("pdf") || fileUrl.startsWith("data:application/pdf");
   const isImage = fileType.startsWith("image/") || fileUrl.startsWith("data:image/");
 
   useEffect(() => {
     let url = "";
-    if (fileUrl.startsWith("data:application/pdf")) {
-      try {
-        const parts = fileUrl.split(';base64,');
-        const contentType = parts[0].split(':')[1] || "application/pdf";
-        const byteCharacters = atob(parts[1]);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
+    
+    async function setupDocument() {
+      if (!fileUrl) return;
+
+      if (isPdf && fileUrl.startsWith("data:application/pdf")) {
+        setProcessing(true);
+        try {
+          let targetBase64 = fileUrl;
+          
+          // If the document is approved, dynamically compile the chancel / electronic stamp inside the PDF 
+          if (docData && docData.status === "APROVADO") {
+            targetBase64 = await generateSignedPdf(fileUrl, docData);
+          }
+
+          url = safeBase64ToBlobUrl(targetBase64, "application/pdf");
+          setBlobUrl(url);
+        } catch (error) {
+          console.error("Error setting up document:", error);
+          setBlobUrl(fileUrl);
+        } finally {
+          setProcessing(false);
         }
-        const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob([byteArray], { type: contentType });
-        url = URL.createObjectURL(blob);
-        setBlobUrl(url);
-      } catch (e) {
-        console.error("Error creating blob URL from base64:", e);
+      } else {
         setBlobUrl(fileUrl);
       }
-    } else {
-      setBlobUrl(fileUrl);
     }
+
+    setupDocument();
 
     return () => {
       if (url && url.startsWith("blob:")) {
         URL.revokeObjectURL(url);
       }
     };
-  }, [fileUrl]);
+  }, [fileUrl, docData?.status, docData?.signatureKey]);
 
   const handleRotate = () => {
     setRotation(prev => (prev + 90) % 360);

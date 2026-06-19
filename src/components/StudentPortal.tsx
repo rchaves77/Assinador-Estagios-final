@@ -5,7 +5,7 @@ import { DocumentStatus, InternshipDocument } from "../types";
 import { calculateSHA256, compressImage, fileToBase64, generateProtocolCode } from "../utils/crypto";
 import { FileText, Upload, CheckCircle2, Search, ArrowRight, AlertTriangle, ShieldCheck, Mail, Clock, Calendar, Building2, User } from "lucide-react";
 import { saveFile } from "../utils/indexedDB";
-import { getPlaceholderPdfBase64 } from "../utils/fileHelper";
+import { getPlaceholderPdfBase64, saveFileToChunks } from "../utils/fileHelper";
 
 export default function StudentPortal() {
   const [activeTab, setActiveTab] = useState<"submit" | "track">("submit");
@@ -114,8 +114,8 @@ export default function StudentPortal() {
       // Load PDF directly as base64
       const base64String = await fileToBase64(file);
       
-      // Check if file is large (over 900KB) to store in IndexedDB and save smaller on Firestore
-      const isLarge = file.size > 900000;
+      // Check if file is large (over 400KB) to store in IndexedDB and save smaller on Firestore
+      const isLarge = file.size > 400000;
 
       setProcessedFileData({
         base64: base64String,
@@ -157,9 +157,10 @@ export default function StudentPortal() {
       const id = generateProtocolCode();
       const docRef = doc(db, "documents", id);
 
-      // If the file is large, store the full base64 in local IndexedDB
+      // If the file is large, store the full base64 in local IndexedDB AND chunk in Firestore
       if (processedFileData.isLarge) {
         await saveFile(id, processedFileData.base64);
+        await saveFileToChunks(id, processedFileData.base64);
       }
 
       const fileUrlToSave = processedFileData.isLarge 

@@ -6,6 +6,8 @@ import {
   ShieldCheck, ArrowLeft, Search, QrCode, Printer, 
   Clock, CheckSquare, Award, AlertTriangle, FileText, CheckCircle
 } from "lucide-react";
+import DocumentViewer from "./DocumentViewer";
+import { resolveFileUrl } from "../utils/fileHelper";
 
 export default function SignatureValidator() {
   const [searchCode, setSearchCode] = useState("");
@@ -13,6 +15,7 @@ export default function SignatureValidator() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [verifiedVia, setVerifiedVia] = useState<"protocol" | null>(null);
+  const [resolvedUrl, setResolvedUrl] = useState<string>("");
 
   // Monitor hash parameters on load to support direct QR codes links
   useEffect(() => {
@@ -55,6 +58,7 @@ export default function SignatureValidator() {
     setErrorMsg(null);
     setCheckedDoc(null);
     setVerifiedVia(null);
+    setResolvedUrl("");
 
     try {
       const docRef = doc(db, "documents", protocol.trim().toUpperCase());
@@ -65,6 +69,13 @@ export default function SignatureValidator() {
         if (data.status === "APROVADO") {
           setCheckedDoc(data);
           setVerifiedVia("protocol");
+          try {
+            const url = await resolveFileUrl(data.id, data.fileUrl);
+            setResolvedUrl(url || data.fileUrl);
+          } catch (e) {
+            console.error("Error resolving file in validator:", e);
+            setResolvedUrl(data.fileUrl);
+          }
         } else {
           setErrorMsg("Este protocolo existe, mas o documento ainda está pendente de análise ou foi recusado pela coordenação.");
         }
@@ -381,6 +392,29 @@ export default function SignatureValidator() {
             </div>
 
           </div>
+
+          {/* Visualizador do Termo Chancelado com pdfSigner embutido */}
+          {resolvedUrl && (
+            <div className="bg-white rounded-none border-2 border-odonto-navy p-6 shadow-xl space-y-4 print:hidden">
+              <div className="border-b-2 border-slate-100 pb-3">
+                <h2 className="text-sm font-black text-slate-900 flex items-center gap-1.5 uppercase tracking-wider">
+                  <FileText className="w-5 h-5 text-odonto-sky" /> Termo com Folha de Homologação Embutida
+                </h2>
+                <p className="text-[10px] text-slate-500 font-semibold uppercase mt-1">
+                  Visualize abaixo o PDF original contendo a chancela eletrônica e a folha de autenticação adicionada.
+                </p>
+              </div>
+
+              <div className="min-h-[500px] h-[650px] overflow-hidden">
+                <DocumentViewer
+                  fileUrl={resolvedUrl}
+                  fileType={checkedDoc.fileType || "application/pdf"}
+                  fileName={checkedDoc.fileName}
+                  docData={checkedDoc}
+                />
+              </div>
+            </div>
+          )}
 
         </div>
       )}
