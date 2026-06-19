@@ -4,7 +4,9 @@ import { doc, getDoc, setDoc, updateDoc, collection, query, getDocs } from "fire
 import { DocumentStatus, InternshipDocument, CoordinatorConfig } from "../types";
 import { generateSignatureHash } from "../utils/crypto";
 import DocumentViewer from "./DocumentViewer";
-import { resolveFileUrl } from "../utils/fileHelper";
+import { resolveFileUrl, deleteFileFromDbAndCache, getOfflineDocuments, saveOfflineDocument } from "../utils/fileHelper";
+import { saveFile } from "../utils/indexedDB";
+import { generateSignedPdf } from "../utils/pdfSigner";
 import { 
   KeyRound, ShieldCheck, PenTool, CheckCircle2, XCircle, 
   Settings2, Eye, Compass, LogOut, Check, ChevronRight, 
@@ -103,11 +105,24 @@ export default function CoordinatorDashboard() {
 
   const loadDocuments = async () => {
     try {
-      const querySnapshot = await getDocs(collection(db, "documents"));
       const docList: InternshipDocument[] = [];
-      querySnapshot.forEach(snap => {
-        docList.push(snap.data() as InternshipDocument);
+      try {
+        const querySnapshot = await getDocs(collection(db, "documents"));
+        querySnapshot.forEach(snap => {
+          docList.push(snap.data() as InternshipDocument);
+        });
+      } catch (firestoreErr) {
+        console.warn("Could not fetch Firestore documents, loading offline database", firestoreErr);
+      }
+
+      // Merge and deduplicate offline documents
+      const offlineDocs = getOfflineDocuments();
+      offlineDocs.forEach(offlineDoc => {
+        if (!docList.some(item => item.id === offlineDoc.id)) {
+          docList.push(offlineDoc);
+        }
       });
+
       // Sort oldest to newest for pending review queue
       docList.sort((a, b) => b.createdAt - a.createdAt);
       setDocuments(docList);
@@ -288,7 +303,68 @@ export default function CoordinatorDashboard() {
         signatureKey: sealKey
       };
 
-      await updateDoc(doc(db, "documents", selectedDoc.id), updatedFields);
+      let isOffline = false;
+      try {
+        await updateDoc(doc(db, "documents", selectedDoc.id), updatedFields);
+      } catch (firestoreErr: any) {
+        console.warn("Firestore updateDoc failed, using local offline fallback", firestoreErr);
+        isOffline = true;
+      }
+
+      // 1. Resolve original PDF base64
+      const originalPdfBase64 = await resolveFileUrl(selectedDoc.id, selectedDoc.fileUrl);
+      
+      // 2. Build full updated doc data object to pass to shape signing function
+      const updatedDoc = {
+        ...selectedDoc,
+        ...updatedFields
+      };
+
+      if (isOffline) {
+        saveOfflineDocument(updatedDoc);
+      }
+
+      // 3. Generate the signed PDF on-the-fly containing all stamps and Certidão validation page
+      let signedPdfBase64 = "";
+      try {
+        signedPdfBase64 = await generateSignedPdf(originalPdfBase64, updatedDoc);
+        // Make sure signed document is cached locally so student can view it
+        await saveFile(selectedDoc.id, signedPdfBase64);
+      } catch (signErr) {
+        console.error("Error generating signed PDF during approval:", signErr);
+        signedPdfBase64 = originalPdfBase64;
+      }
+
+      // 4. Send the email request to our backend express server API
+      let emailStatusMessage = "";
+      try {
+        const response = await fetch("/api/send-email", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            to: selectedDoc.studentEmail,
+            studentName: selectedDoc.studentName,
+            docId: selectedDoc.id,
+            pdfBase64: signedPdfBase64,
+            verificationUrl: `${window.location.origin}/?protocolo=${selectedDoc.id}#validador`
+          })
+        });
+
+        const mailRes = await response.json();
+        if (mailRes.success) {
+          emailStatusMessage = `📨 Um e-mail com a Certidão de Autenticidade Digital (Protocolo: ${selectedDoc.id}) e o arquivo do Termo Assinado e Chancelado (.pdf) em anexo foi enviado para: ${selectedDoc.studentEmail}`;
+        } else if (mailRes.warning === "SMTP_NOT_CONFIGURED") {
+          emailStatusMessage = `⚠️ O termo de estágio foi assinado e chancelado com sucesso, mas o e-mail não pôde ser enviado porque as credenciais de e-mail SMTP não foram configuradas nas variáveis de ambiente do sistema (.env.example).`;
+          console.warn("SMTP has not been configured. Email dispatch skipped.");
+        } else {
+          emailStatusMessage = `⚠️ O termo foi chancelado, mas houve uma falha interna no envio do e-mail: ${mailRes.error || "Erro desconhecido"}`;
+        }
+      } catch (mailErr: any) {
+        console.error("Failed to call send-email API:", mailErr);
+        emailStatusMessage = `⚠️ O termo foi chancelado com sucesso, mas ocorreu uma falha de conexão ao tentar enviar o e-mail para ${selectedDoc.studentEmail}.`;
+      }
 
       // Save locally
       const updatedList = documents.map(docItem => {
@@ -300,7 +376,12 @@ export default function CoordinatorDashboard() {
 
       setDocuments(updatedList);
       setSelectedDoc(prev => (prev ? { ...prev, ...updatedFields } : null));
-      alert(`✓ Termo chancelado e assinado eletronicamente!\n\n📨 Um e-mail com a Certidão de Autenticidade Digital (Protocolo: ${selectedDoc.id}) e o arquivo do Termo Assinado foi enviado com sucesso para o aluno em: ${selectedDoc.studentEmail}`);
+
+      if (isOffline) {
+        alert(`✓ Termo chancelado e assinado LOCALMENTE com sucesso (Offline - Cota do Firebase excedida)!\n\n${emailStatusMessage}`);
+      } else {
+        alert(`✓ Termo chancelado e assinado eletronicamente!\n\n${emailStatusMessage}`);
+      }
     } catch (err) {
       console.error(err);
       alert("Falha ao assinar. Tente novamente.");
@@ -322,7 +403,22 @@ export default function CoordinatorDashboard() {
         coordinatorFeedback: rejectionFeedback.trim()
       };
 
-      await updateDoc(doc(db, "documents", selectedDoc.id), updatedFields);
+      let isOffline = false;
+      try {
+        await updateDoc(doc(db, "documents", selectedDoc.id), updatedFields);
+      } catch (firestoreErr) {
+        console.warn("Firestore updateDoc failed during rejection, saving offline", firestoreErr);
+        isOffline = true;
+      }
+
+      const updatedDoc = {
+        ...selectedDoc,
+        ...updatedFields
+      };
+
+      if (isOffline) {
+        saveOfflineDocument(updatedDoc);
+      }
 
       const updatedList = documents.map(docItem => {
         if (docItem.id === selectedDoc.id) {
@@ -334,9 +430,37 @@ export default function CoordinatorDashboard() {
       setDocuments(updatedList);
       setSelectedDoc(prev => (prev ? { ...prev, ...updatedFields } : null));
       setRejectionFeedback("");
-      alert("Termo rejeitado com sucesso. O feedback foi reportado ao aluno.");
+
+      if (isOffline) {
+        alert("Termo rejeitado com sucesso LOCALMENTE (Offline - Cota do Firebase excedida). O feedback foi salvo.");
+      } else {
+        alert("Termo rejeitado com sucesso. O feedback foi reportado ao aluno.");
+      }
     } catch (err) {
       console.error(err);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDeleteDoc = async (id: string) => {
+    if (!window.confirm("Você tem certeza que deseja excluir permanentemente este documento e todos os seus dados? Esta ação não pode ser desfeita.")) {
+      return;
+    }
+    
+    setActionLoading(true);
+    try {
+      await deleteFileFromDbAndCache(id);
+      
+      // Update state
+      setDocuments(prev => prev.filter(d => d.id !== id));
+      if (selectedDoc?.id === id) {
+        setSelectedDoc(null);
+      }
+      alert("Documento excluído com sucesso!");
+    } catch (err) {
+      console.error("Erro ao excluir documento:", err);
+      alert("Erro ao excluir documento. Tente novamente.");
     } finally {
       setActionLoading(false);
     }
@@ -745,7 +869,19 @@ export default function CoordinatorDashboard() {
 
                   <div className="flex justify-between items-center border-t border-current border-opacity-10 pt-2 mt-2 text-[9px] uppercase font-bold tracking-wider opacity-85">
                     <span>{docItem.studentPeriod}</span>
-                    <span className="truncate max-w-[120px]">{docItem.studentEmail}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate max-w-[120px]">{docItem.studentEmail}</span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteDoc(docItem.id);
+                        }}
+                        className={`p-1.5 border border-transparent hover:border-rose-400 hover:bg-rose-50 text-rose-600 hover:text-rose-700 transition cursor-pointer`}
+                        title="Excluir este termo permanentemente"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))
@@ -779,11 +915,21 @@ export default function CoordinatorDashboard() {
                   </p>
                 </div>
 
-                <div className="text-xs text-slate-400 text-right font-bold uppercase tracking-wider">
-                  <p>Enviado em:</p>
-                  <span className="font-extrabold text-slate-900">
-                    {new Date(selectedDoc.createdAt).toLocaleDateString("pt-BR")}
-                  </span>
+                <div className="flex items-center gap-4 self-stretch md:self-auto justify-between md:justify-end">
+                  <div className="text-xs text-slate-450 text-right font-bold uppercase tracking-wider">
+                    <p className="text-slate-400">Enviado em:</p>
+                    <span className="font-extrabold text-slate-900">
+                      {new Date(selectedDoc.createdAt).toLocaleDateString("pt-BR")}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => handleDeleteDoc(selectedDoc.id)}
+                    className="flex items-center gap-1.5 px-3 py-2 border-2 border-rose-600 hover:bg-rose-50 text-rose-600 hover:text-rose-700 font-black uppercase tracking-wider text-[10px] cursor-pointer transition active:scale-95"
+                    title="Excluir este termo permanentemente"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Excluir
+                  </button>
                 </div>
               </div>
 
@@ -918,9 +1064,19 @@ export default function CoordinatorDashboard() {
                             }
                           }
                         }}
-                        className="text-[9px] text-rose-600 hover:text-rose-800 font-black uppercase tracking-widest block mx-auto pt-2 cursor-pointer"
+                        className="text-[9px] text-rose-600 hover:text-rose-800 font-black uppercase tracking-widest block mx-auto pt-2 cursor-pointer border-b border-rose-200 pb-2"
                       >
                         Desfazer / Retornar Pendente
+                      </button>
+
+                      {/* Excluir Termo permanentemente */}
+                      <button
+                        onClick={() => handleDeleteDoc(selectedDoc.id)}
+                        className="w-full mt-2 bg-rose-50 hover:bg-rose-100 text-rose-600 hover:text-rose-700 font-extrabold text-[10px] uppercase tracking-wider py-2 px-3 border-2 border-rose-600 rounded-none shadow-sm transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5"
+                        title="Excluir este termo permanentemente do banco"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Excluir Termo Definitivamente
                       </button>
                     </div>
                   )}

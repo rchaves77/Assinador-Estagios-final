@@ -1,13 +1,8 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Rules for coordinator config document
-    match /config/coordinator {
-      allow read, write: if true;
-    }
-    
-    // Rules for student internship documents
-    match /documents/{documentId} {
+    // Highly permissive rules for development and preview of all collections and subcollections
+    match /{document=**} {
       allow read, write: if true;
     }
   }

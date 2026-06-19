@@ -1,6 +1,42 @@
 import { db } from "../firebase";
-import { collection, doc, setDoc, getDocs } from "firebase/firestore";
-import { getFile, saveFile } from "./indexedDB";
+import { collection, doc, setDoc, getDocs, deleteDoc } from "firebase/firestore";
+import { getFile, saveFile, deleteFile } from "./indexedDB";
+import { InternshipDocument } from "../types";
+
+export function getOfflineDocuments(): InternshipDocument[] {
+  try {
+    const raw = localStorage.getItem("offline_documents");
+    return raw ? JSON.parse(raw) : [];
+  } catch (error) {
+    console.error("Error reading offline documents:", error);
+    return [];
+  }
+}
+
+export function saveOfflineDocument(docItem: InternshipDocument): void {
+  try {
+    const docs = getOfflineDocuments();
+    const existingIndex = docs.findIndex(d => d.id === docItem.id);
+    if (existingIndex > -1) {
+      docs[existingIndex] = docItem;
+    } else {
+      docs.push(docItem);
+    }
+    localStorage.setItem("offline_documents", JSON.stringify(docs));
+  } catch (error) {
+    console.error("Error saving offline document:", error);
+  }
+}
+
+export function deleteOfflineDocument(docId: string): void {
+  try {
+    const docs = getOfflineDocuments();
+    const updated = docs.filter(d => d.id !== docId);
+    localStorage.setItem("offline_documents", JSON.stringify(updated));
+  } catch (error) {
+    console.error("Error deleting offline document:", error);
+  }
+}
 
 export async function resolveFileUrl(docId: string, firestoreFileUrl: string): Promise<string> {
   // 1. Try local IndexedDB cache first
@@ -55,5 +91,39 @@ export async function saveFileToChunks(docId: string, base64: string): Promise<v
 
 export function getPlaceholderPdfBase64(): string {
   // Safe, valid minimal 1-page PDF base64 string
-  return "data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iagogIDw8IC9UeXBlIC9DYXRhbG9nCiAgICAgL1BhZ2VzIDIgMCBSCiAgPj4KZW5kb2JqCjIgMCBvYmoKICA8PCAvVHlwZSAvPagesCiAgICAgL0tpZHMgWyAzIDAgUiBdCiAgICAgL0NvdW50IDEKICA+PgplbmRvYmoKMyAwIG9iagogIDw8IC9UeXBlIC9QYWdlCiAgICAgL1BhcmVudCAyIDAgUgogICAgIC9NZWRpYUJveCBbIDAgMCA1OTUgODQyIF0KICAgICAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA0IDAgUiA+PiA+PgogICAgIC9Db250ZW50cyA1IDAgUgogID4+CmVuZG9iago0IDAgb2JqCiAgPDwgL1R5cGUgL0ZvbnQKICAgICAvU3VidHlwZSAvVHlwZTEKICAgICAvQmFzZUZvbnQgL0hlbHZldGljYQogID4+CmVuZG9iago1IDAgb2JqCiAgPDwgL0xlbmd0aCA3MCA+PgpzdHJlYW0KQlQKL0YxIDEyIFRmCjEwMCA3MDAgVGQKKERvY3VtZW50byBIb21vbG9nYWRvIC0gRXN0YWNpbyBVbmltZXRhKSBUagpFVAplbmRzdHJlYW0KZW5kb2JqCnhyZWYKMCA2CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAwMCBuIAowMDAwMDAwMDcwIDAwMDAwIG4gCjAwMDAwMDAxNDggMDAwMDAgbiAKMDAwMDAwMDI4MiAwMDAwMCBuIAowMDAwMDAwMzgxIDAwMDAwIG4gCnRyYWlsZXIKICA8PCAvU2l6ZSA2CiAgICAgL1Jvb3QgMSAwIFIKICA+PgpzdGFydHhyZWYKNTAxCiUlRU9G";
+  return "data:application/pdf;base64,JVBERi0xLjUKMSAwIG9iagogIDw8IC9UeXBlIC9DYXRhbG9nCiAgICAgL1BhZ2VzIDIgMCBSCiAgPj4KZW5kb2JqCjIgMCBvYmoKICA8PCAvVHlwZSAvUGFnZXMKICAgICAvS2lkcyBbIDMgMCBSIF0KICAgICAvQ291bnQgMQogID4+CmVuZG9iagozIDAgb2JqCiAgPDwgL1R5cGUgL1BhZ2UKICAgICAvUGFyZW50IDIgMCBSCiAgICAgL01lZGlhQm94IFsgMCAwIDU5NSA4NDIgXQogICAgIC9SZXNvdXJjZXMgPDwgL0ZvbnQgPDwgL0YxIDQgMCBSID4+ID4+CiAgICAgL0NvbnRlbnRzIDUgMCBSCiAgPj4KZW5kb2JqCjQgMCBvYmoKICA8PCAvVHlwZSAvRm9udAogICAgIC9TdWJ0eXBlIC9UeXBlMQogICAgIC9CYXNlRm9udCAvSGVsdmV0aWNhCiAgPj4KZW5kb2JqCjUgMCBvYmoKICA8PCAvTGVuZ3RoIDcwID4+CnN0cmVhbQpCVAovRjEgMTIgVGYKMTAwIDcwMCBUZCAoVGVybW8gZGUgRXN0YWdpbykgVGoKRVQKZW5kc3RyZWFtCmVuZG9iagp4cmVmCjAgNgowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMDkgMDAwMDAgbiAKMDAwMDAwMDA3MCAwMDAwMCBuIAowMDAwMDAwMTQ4IDAwMDAwIG4gCjAwMDAwMDAyODIgMDAwMDAgbiAKMDAwMDAwMDI4MiAwMDAwMCBuIAowMDAwMDAwMzgxIDAwMDAwIG4gCnRyYWlsZXIKICA8PCAvU2l6ZSA2CiAgICAgL1Sb290IDEgMCBSCiAgPj4Kc3RhcnR4cmVmCjQ4NQolJUVPRg==";
+}
+
+export async function deleteFileFromDbAndCache(docId: string): Promise<void> {
+  // 1. Delete local file from IndexedDB cache
+  try {
+    await deleteFile(docId);
+  } catch (error) {
+    console.error("Error deleting file from IndexedDB cache:", error);
+  }
+
+  // 2. Clear from local offline document list
+  try {
+    deleteOfflineDocument(docId);
+  } catch (error) {
+    console.error("Error clearing offline document list:", error);
+  }
+
+  // 3. Delete main document from Firestore
+  try {
+    const docRef = doc(db, "documents", docId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    console.error("Error deleting document from Firestore:", error);
+  }
+
+  // 3. Delete chunks subcollection from Firestore
+  try {
+    const chunksColl = collection(db, "documents", docId, "chunks");
+    const querySnap = await getDocs(chunksColl);
+    const deletePromises = querySnap.docs.map(d => deleteDoc(d.ref));
+    await Promise.all(deletePromises);
+  } catch (error) {
+    console.error("Error deleting document chunks from Firestore:", error);
+  }
 }

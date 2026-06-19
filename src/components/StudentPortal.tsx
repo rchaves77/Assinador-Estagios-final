@@ -3,9 +3,9 @@ import { db } from "../firebase";
 import { collection, doc, setDoc, query, where, getDocs } from "firebase/firestore";
 import { DocumentStatus, InternshipDocument } from "../types";
 import { calculateSHA256, compressImage, fileToBase64, generateProtocolCode } from "../utils/crypto";
-import { FileText, Upload, CheckCircle2, Search, ArrowRight, AlertTriangle, ShieldCheck, Mail, Clock, Calendar, Building2, User } from "lucide-react";
+import { FileText, Upload, CheckCircle2, Search, ArrowRight, AlertTriangle, ShieldCheck, Mail, Clock, Calendar, Building2, User, Trash2 } from "lucide-react";
 import { saveFile } from "../utils/indexedDB";
-import { getPlaceholderPdfBase64, saveFileToChunks } from "../utils/fileHelper";
+import { getPlaceholderPdfBase64, saveFileToChunks, deleteFileFromDbAndCache, getOfflineDocuments, saveOfflineDocument } from "../utils/fileHelper";
 
 export default function StudentPortal() {
   const [activeTab, setActiveTab] = useState<"submit" | "track">("submit");
@@ -55,6 +55,26 @@ export default function StudentPortal() {
   const [trackingResults, setTrackingResults] = useState<InternshipDocument[]>([]);
   const [trackLoading, setTrackLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+
+  const handleDeleteDoc = async (id: string) => {
+    if (!window.confirm("Você tem certeza que deseja excluir permanentemente este termo de estágio? Esta ação não pode ser desfeita.")) {
+      return;
+    }
+
+    try {
+      setTrackLoading(true);
+      await deleteFileFromDbAndCache(id);
+      
+      // Update local student tracking list
+      setTrackingResults(prev => prev.filter(item => item.id !== id));
+      alert("Termo de estágio excluído permanentemente com sucesso!");
+    } catch (err) {
+      console.error("Erro ao excluir termo:", err);
+      alert("Não foi possível excluir o termo de estágio.");
+    } finally {
+      setTrackLoading(false);
+    }
+  };
 
   const periods = [
     "4º Período", "5º Período",
@@ -157,11 +177,8 @@ export default function StudentPortal() {
       const id = generateProtocolCode();
       const docRef = doc(db, "documents", id);
 
-      // If the file is large, store the full base64 in local IndexedDB AND chunk in Firestore
-      if (processedFileData.isLarge) {
-        await saveFile(id, processedFileData.base64);
-        await saveFileToChunks(id, processedFileData.base64);
-      }
+      // Always save file into local IndexedDB
+      await saveFile(id, processedFileData.base64);
 
       const fileUrlToSave = processedFileData.isLarge 
         ? getPlaceholderPdfBase64() 
@@ -185,7 +202,26 @@ export default function StudentPortal() {
         status: DocumentStatus.PENDING
       };
 
-      await setDoc(docRef, newDoc);
+      let isOffline = false;
+      try {
+        // Try saving to live Firestore
+        if (processedFileData.isLarge) {
+          await saveFileToChunks(id, processedFileData.base64);
+        }
+        await setDoc(docRef, newDoc);
+      } catch (firestoreErr: any) {
+        console.warn("Firestore save failed, falling back to offline browser storage", firestoreErr);
+        saveOfflineDocument(newDoc);
+        isOffline = true;
+      }
+
+      if (isOffline) {
+        alert(
+          "⚠️ Cota Diária do Firebase Excedida!\n\n" +
+          "O limite diário de gravações gratuitas do banco de dados Firebase (Firestore) foi atingido.\n\n" +
+          "Para que sua experiência e testes continuem sem interrupções, o sistema salvou seu termo de estágio LOCALMENTE (Offline) neste navegador. Ele aparecerá normalmente no painel de acompanhamento e no painel do coordenador!"
+        );
+      }
 
       setSuccessProtocol(id);
       // Reset form
@@ -203,7 +239,7 @@ export default function StudentPortal() {
       setProcessedFileData(null);
     } catch (err: any) {
       console.error(err);
-      setErrorMsg("Erro ao salvar no banco de dados. Tente novamente.");
+      setErrorMsg("Erro ao processar o documento. Tente novamente.");
     } finally {
       setLoading(false);
     }
@@ -218,28 +254,46 @@ export default function StudentPortal() {
     setErrorMsg(null);
 
     try {
-      const qMatricula = query(
-        collection(db, "documents"),
-        where("studentRegistration", "==", trackQuery.trim())
-      );
-      
-      const qProtocolo = query(
-        collection(db, "documents"),
-        where("id", "==", trackQuery.trim().toUpperCase())
-      );
-
-      const [resMatricula, resProtocolo] = await Promise.all([
-        getDocs(qMatricula),
-        getDocs(qProtocolo)
-      ]);
-
+      const queryStr = trackQuery.trim();
       const list: InternshipDocument[] = [];
-      resMatricula.forEach(docSnap => {
-        list.push(docSnap.data() as InternshipDocument);
-      });
-      resProtocolo.forEach(docSnap => {
-        if (!list.some(item => item.id === docSnap.id)) {
+
+      try {
+        const qMatricula = query(
+          collection(db, "documents"),
+          where("studentRegistration", "==", queryStr)
+        );
+        
+        const qProtocolo = query(
+          collection(db, "documents"),
+          where("id", "==", queryStr.toUpperCase())
+        );
+
+        const [resMatricula, resProtocolo] = await Promise.all([
+          getDocs(qMatricula),
+          getDocs(qProtocolo)
+        ]);
+
+        resMatricula.forEach(docSnap => {
           list.push(docSnap.data() as InternshipDocument);
+        });
+        resProtocolo.forEach(docSnap => {
+          if (!list.some(item => item.id === docSnap.id)) {
+            list.push(docSnap.data() as InternshipDocument);
+          }
+        });
+      } catch (firestoreErr: any) {
+        console.warn("Firestore query failed, loading from offline cache only", firestoreErr);
+      }
+
+      // Always merge matched offline documents
+      const offlineDocs = getOfflineDocuments();
+      const matchingOffline = offlineDocs.filter(
+        d => d.studentRegistration === queryStr || d.id === queryStr.toUpperCase()
+      );
+
+      matchingOffline.forEach(offlineDoc => {
+        if (!list.some(item => item.id === offlineDoc.id)) {
+          list.push(offlineDoc);
         }
       });
 
@@ -248,7 +302,7 @@ export default function StudentPortal() {
       setTrackingResults(list);
     } catch (err: any) {
       console.error(err);
-      setErrorMsg("Erro ao buscar histórico. Verifique sua conexão.");
+      setErrorMsg("Erro ao buscar histórico. Verifique se digitou o CPF, matrícula ou protocolo correto.");
     } finally {
       setTrackLoading(false);
     }
@@ -602,17 +656,27 @@ export default function StudentPortal() {
                         </p>
                       </div>
 
-                      <div className="text-right text-xs text-slate-400">
-                        <span>Submetido em: </span>
-                        <span className="font-extrabold text-slate-700">
-                          {new Date(docItem.createdAt).toLocaleDateString("pt-BR", {
-                            day: "2-digit",
-                            month: "2-digit",
-                            year: "numeric",
-                            hour: "2-digit",
-                            minute: "2-digit"
-                          })}
-                        </span>
+                       <div className="text-right text-xs text-slate-400 flex flex-col sm:items-end gap-2 shrink-0">
+                        <div>
+                          <span>Submetido em: </span>
+                          <span className="font-extrabold text-slate-700">
+                            {new Date(docItem.createdAt).toLocaleDateString("pt-BR", {
+                              day: "2-digit",
+                              month: "2-digit",
+                              year: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit"
+                            })}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => handleDeleteDoc(docItem.id)}
+                          className="flex items-center gap-1.5 self-end px-2.5 py-1 px-3 border border-rose-500 hover:bg-rose-50 text-rose-500 hover:text-rose-600 rounded-lg text-[10px] font-bold transition cursor-pointer"
+                          title="Excluir este termo permanentemente do banco"
+                        >
+                          <Trash2 className="w-3" />
+                          Excluir Termo
+                        </button>
                       </div>
                     </div>
 
