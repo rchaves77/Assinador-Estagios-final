@@ -42,8 +42,8 @@ export async function resolveFileUrl(docId: string, firestoreFileUrl: string): P
   // 1. Try local IndexedDB cache first
   const localFile = await getFile(docId);
   if (localFile && localFile.startsWith("data:application/pdf;base64,")) {
-    // Make sure it's original content (> 5000 chars)
-    if (localFile.length > 5000) {
+    // Make sure it's original content (placeholder PDF is 912 chars)
+    if (localFile.length > 1000) {
       return localFile;
     }
   }

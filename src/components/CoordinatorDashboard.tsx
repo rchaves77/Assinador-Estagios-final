@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { db } from "../firebase";
 import { doc, getDoc, setDoc, updateDoc, collection, query, getDocs } from "firebase/firestore";
 import { DocumentStatus, InternshipDocument, CoordinatorConfig } from "../types";
-import { generateSignatureHash } from "../utils/crypto";
+import { generateSignatureHash, fileToBase64 } from "../utils/crypto";
 import DocumentViewer from "./DocumentViewer";
 import { resolveFileUrl, deleteFileFromDbAndCache, getOfflineDocuments, saveOfflineDocument } from "../utils/fileHelper";
 import { saveFile } from "../utils/indexedDB";
@@ -10,7 +10,7 @@ import { generateSignedPdf } from "../utils/pdfSigner";
 import { 
   KeyRound, ShieldCheck, PenTool, CheckCircle2, XCircle, 
   Settings2, Eye, Compass, LogOut, Check, ChevronRight, 
-  Trash2, FileCheck, CircleSlash, RefreshCw, Star, Info
+  Trash2, FileCheck, CircleSlash, RefreshCw, Star, Info, Upload
 } from "lucide-react";
 
 export default function CoordinatorDashboard() {
@@ -937,7 +937,47 @@ export default function CoordinatorDashboard() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 
                 {/* Visualizer (2/3 space) */}
-                <div className="md:col-span-2">
+                <div className="md:col-span-2 space-y-4">
+                  {((resolvedFileUrl || selectedDoc.fileUrl || "").length < 1500) && (
+                    <div className="bg-amber-50 border-2 border-amber-500 p-4 rounded-none">
+                      <div className="flex items-start gap-2.5">
+                        <Info className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+                        <div className="space-y-1.5 flex-1 text-amber-900">
+                          <span className="font-extrabold text-xs block uppercase tracking-wider">Aviso: Arquivo Original não Sincronizado</span>
+                          <p className="text-xs leading-relaxed font-semibold">
+                            O arquivo PDF original deste documento não está disponível no Firebase (provocado pela cota diária gratuita do banco de dados excedida ou documento gravado offline).
+                          </p>
+                          <p className="text-[11px] leading-relaxed opacity-95">
+                            Para chancelar ou visualizar este termo, basta selecionar o arquivo PDF original em seu computador. O sistema o carregará de maneira segura e local para que você possa visualizá-lo e assiná-lo perfeitamente!
+                          </p>
+                          <label className="mt-2 inline-flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white font-black text-[10px] uppercase tracking-widest px-3 py-2 border border-amber-700 cursor-pointer transition active:scale-95">
+                            <Upload className="w-3.5 h-3.5" />
+                            Preencher PDF Original Manualmente
+                            <input
+                              type="file"
+                              accept=".pdf"
+                              className="hidden"
+                              onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  try {
+                                    const base64 = await fileToBase64(file);
+                                    setResolvedFileUrl(base64);
+                                    await saveFile(selectedDoc.id, base64);
+                                    alert("✓ PDF carregado localmente com sucesso! Agora você pode visualizá-lo e chancelá-lo normalmente.");
+                                  } catch (err) {
+                                    console.error("Erro ao ler arquivo local:", err);
+                                    alert("Erro ao ler o arquivo PDF.");
+                                  }
+                                }
+                              }}
+                            />
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <DocumentViewer
                     fileUrl={resolvedFileUrl || selectedDoc.fileUrl}
                     fileType={selectedDoc.fileType}

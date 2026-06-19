@@ -7,7 +7,7 @@ import {
   Clock, CheckSquare, Award, AlertTriangle, FileText, CheckCircle
 } from "lucide-react";
 import DocumentViewer from "./DocumentViewer";
-import { resolveFileUrl } from "../utils/fileHelper";
+import { resolveFileUrl, getOfflineDocuments } from "../utils/fileHelper";
 
 export default function SignatureValidator() {
   const [searchCode, setSearchCode] = useState("");
@@ -60,21 +60,40 @@ export default function SignatureValidator() {
     setVerifiedVia(null);
     setResolvedUrl("");
 
+    const termCode = protocol.trim().toUpperCase();
+    let docData: InternshipDocument | null = null;
+
     try {
-      const docRef = doc(db, "documents", protocol.trim().toUpperCase());
+      const docRef = doc(db, "documents", termCode);
       const docSnap = await getDoc(docRef);
 
       if (docSnap.exists()) {
-        const data = docSnap.data() as InternshipDocument;
-        if (data.status === "APROVADO") {
-          setCheckedDoc(data);
+        docData = docSnap.data() as InternshipDocument;
+      }
+    } catch (firestoreErr) {
+      console.warn("Firestore search failed, looking up locally offline instead", firestoreErr);
+    }
+
+    // Lookup local offline storage as fallback if firestore returned empty or failed due to quota
+    if (!docData) {
+      const localDocs = getOfflineDocuments();
+      const localFound = localDocs.find(d => d.id === termCode);
+      if (localFound) {
+        docData = localFound;
+      }
+    }
+
+    try {
+      if (docData) {
+        if (docData.status === "APROVADO") {
+          setCheckedDoc(docData);
           setVerifiedVia("protocol");
           try {
-            const url = await resolveFileUrl(data.id, data.fileUrl);
-            setResolvedUrl(url || data.fileUrl);
+            const url = await resolveFileUrl(docData.id, docData.fileUrl);
+            setResolvedUrl(url || docData.fileUrl);
           } catch (e) {
             console.error("Error resolving file in validator:", e);
-            setResolvedUrl(data.fileUrl);
+            setResolvedUrl(docData.fileUrl);
           }
         } else {
           setErrorMsg("Este protocolo existe, mas o documento ainda está pendente de análise ou foi recusado pela coordenação.");
