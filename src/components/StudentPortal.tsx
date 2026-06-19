@@ -1,6 +1,4 @@
 import React, { useState, useRef, DragEvent } from "react";
-import { db } from "../firebase";
-import { collection, doc, setDoc, query, where, getDocs } from "firebase/firestore";
 import { DocumentStatus, InternshipDocument } from "../types";
 import { calculateSHA256, compressImage, fileToBase64, generateProtocolCode } from "../utils/crypto";
 import { FileText, Upload, CheckCircle2, Search, ArrowRight, AlertTriangle, ShieldCheck, Mail, Clock, Calendar, Building2, User, Trash2 } from "lucide-react";
@@ -175,7 +173,6 @@ export default function StudentPortal() {
 
     try {
       const id = generateProtocolCode();
-      const docRef = doc(db, "documents", id);
 
       // Always save file into local IndexedDB
       await saveFile(id, processedFileData.base64);
@@ -204,22 +201,26 @@ export default function StudentPortal() {
 
       let isOffline = false;
       try {
-        // Try saving to live Firestore
-        if (processedFileData.isLarge) {
-          await saveFileToChunks(id, processedFileData.base64);
+        const res = await fetch("/api/documents", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(newDoc)
+        });
+        if (!res.ok) {
+          throw new Error("HTTP error " + res.status);
         }
-        await setDoc(docRef, newDoc);
-      } catch (firestoreErr: any) {
-        console.warn("Firestore save failed, falling back to offline browser storage", firestoreErr);
+      } catch (dbErr: any) {
+        console.warn("PostgreSQL API save failed, falling back to offline browser storage", dbErr);
         saveOfflineDocument(newDoc);
         isOffline = true;
       }
 
       if (isOffline) {
         alert(
-          "⚠️ Cota Diária do Firebase Excedida!\n\n" +
-          "O limite diário de gravações gratuitas do banco de dados Firebase (Firestore) foi atingido.\n\n" +
-          "Para que sua experiência e testes continuem sem interrupções, o sistema salvou seu termo de estágio LOCALMENTE (Offline) neste navegador. Ele aparecerá normalmente no painel de acompanhamento e no painel do coordenador!"
+          "⚠️ Modo Offline Ativado!\n\n" +
+          "O sistema salvou seu termo de estágio LOCALMENTE (Offline) neste navegador. Ele aparecerá normalmente no painel de acompanhamento e no painel do coordenador!"
         );
       }
 
@@ -258,31 +259,20 @@ export default function StudentPortal() {
       const list: InternshipDocument[] = [];
 
       try {
-        const qMatricula = query(
-          collection(db, "documents"),
-          where("studentRegistration", "==", queryStr)
-        );
-        
-        const qProtocolo = query(
-          collection(db, "documents"),
-          where("id", "==", queryStr.toUpperCase())
-        );
-
-        const [resMatricula, resProtocolo] = await Promise.all([
-          getDocs(qMatricula),
-          getDocs(qProtocolo)
-        ]);
-
-        resMatricula.forEach(docSnap => {
-          list.push(docSnap.data() as InternshipDocument);
-        });
-        resProtocolo.forEach(docSnap => {
-          if (!list.some(item => item.id === docSnap.id)) {
-            list.push(docSnap.data() as InternshipDocument);
-          }
-        });
-      } catch (firestoreErr: any) {
-        console.warn("Firestore query failed, loading from offline cache only", firestoreErr);
+        const res = await fetch("/api/documents");
+        if (res.ok) {
+          const allDocs: InternshipDocument[] = await res.json();
+          const filtered = allDocs.filter(
+            d => d.studentRegistration === queryStr || d.id === queryStr.toUpperCase()
+          );
+          filtered.forEach(item => {
+            list.push(item);
+          });
+        } else {
+          throw new Error("HTTP error " + res.status);
+        }
+      } catch (dbErr: any) {
+        console.warn("PostgreSQL query failed, loading from offline cache only", dbErr);
       }
 
       // Always merge matched offline documents

@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { db } from "../firebase";
-import { doc, getDoc, setDoc, updateDoc, collection, query, getDocs } from "firebase/firestore";
+// Removed firestore imports
 import { DocumentStatus, InternshipDocument, CoordinatorConfig } from "../types";
 import { generateSignatureHash, fileToBase64 } from "../utils/crypto";
 import DocumentViewer from "./DocumentViewer";
@@ -84,13 +83,17 @@ export default function CoordinatorDashboard() {
   const fetchCoordinatorConfig = async () => {
     setLoading(true);
     try {
-      const configDoc = await getDoc(doc(db, "config", "coordinator"));
-      if (configDoc.exists()) {
-        const loadedData = configDoc.data() as CoordinatorConfig;
+      const res = await fetch("/api/config");
+      if (res.ok) {
+        const loadedData = await res.json() as CoordinatorConfig;
         if (!loadedData.signatureKey) {
           const generatedKey = "ODONTO-SIG-" + Math.random().toString(36).substring(2, 8).toUpperCase();
           const migratedData = { ...loadedData, signatureKey: generatedKey };
-          await updateDoc(doc(db, "config", "coordinator"), { signatureKey: generatedKey });
+          await fetch("/api/config", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(migratedData)
+          });
           setConfig(migratedData);
         } else {
           setConfig(loadedData);
@@ -107,12 +110,17 @@ export default function CoordinatorDashboard() {
     try {
       const docList: InternshipDocument[] = [];
       try {
-        const querySnapshot = await getDocs(collection(db, "documents"));
-        querySnapshot.forEach(snap => {
-          docList.push(snap.data() as InternshipDocument);
-        });
-      } catch (firestoreErr) {
-        console.warn("Could not fetch Firestore documents, loading offline database", firestoreErr);
+        const res = await fetch("/api/documents");
+        if (res.ok) {
+          const list = await res.json() as InternshipDocument[];
+          list.forEach(item => {
+            docList.push(item);
+          });
+        } else {
+          throw new Error("HTTP " + res.status);
+        }
+      } catch (dbErr) {
+        console.warn("Could not fetch documents from API, loading offline database", dbErr);
       }
 
       // Merge and deduplicate offline documents
@@ -171,7 +179,14 @@ export default function CoordinatorDashboard() {
         signatureKey: randomKey
       };
 
-      await setDoc(doc(db, "config", "coordinator"), newConfig);
+      const res = await fetch("/api/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newConfig)
+      });
+      if (!res.ok) {
+        throw new Error("HTTP error " + res.status);
+      }
       setConfig(newConfig);
       setIsAuthenticated(true); // Auto logs in
     } catch (err) {
@@ -268,7 +283,14 @@ export default function CoordinatorDashboard() {
         signatureKey: editSignatureKey.trim().toUpperCase()
       };
       
-      await setDoc(doc(db, "config", "coordinator"), updatedConfig);
+      const res = await fetch("/api/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updatedConfig)
+      });
+      if (!res.ok) {
+        throw new Error("HTTP error " + res.status);
+      }
       setConfig(updatedConfig);
       alert("Sua chave de assinatura eletrônica e perfil foram salvos com sucesso!");
       setShowSettings(false);
@@ -305,9 +327,16 @@ export default function CoordinatorDashboard() {
 
       let isOffline = false;
       try {
-        await updateDoc(doc(db, "documents", selectedDoc.id), updatedFields);
-      } catch (firestoreErr: any) {
-        console.warn("Firestore updateDoc failed, using local offline fallback", firestoreErr);
+        const res = await fetch(`/api/documents/${selectedDoc.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updatedFields)
+        });
+        if (!res.ok) {
+          throw new Error("HTTP error " + res.status);
+        }
+      } catch (dbErr: any) {
+        console.warn("PostgreSQL API update failed, using local offline fallback", dbErr);
         isOffline = true;
       }
 
@@ -405,9 +434,16 @@ export default function CoordinatorDashboard() {
 
       let isOffline = false;
       try {
-        await updateDoc(doc(db, "documents", selectedDoc.id), updatedFields);
-      } catch (firestoreErr) {
-        console.warn("Firestore updateDoc failed during rejection, saving offline", firestoreErr);
+        const res = await fetch(`/api/documents/${selectedDoc.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updatedFields)
+        });
+        if (!res.ok) {
+          throw new Error("HTTP error " + res.status);
+        }
+      } catch (dbErr: any) {
+        console.warn("PostgreSQL API rejection failed, saving offline", dbErr);
         isOffline = true;
       }
 
@@ -1087,13 +1123,19 @@ export default function CoordinatorDashboard() {
                           if (confirm("Resetar este termo para pendente novamente?")) {
                             setLoading(true);
                             try {
-                              const docRef = doc(db, "documents", selectedDoc.id);
-                              await updateDoc(docRef, {
-                                status: DocumentStatus.PENDING,
-                                coordinatorFeedback: "",
-                                coordinatorSignatureText: "",
-                                signatureHash: ""
+                              const res = await fetch(`/api/documents/${selectedDoc.id}`, {
+                                method: "PUT",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  status: DocumentStatus.PENDING,
+                                  coordinatorFeedback: "",
+                                  coordinatorSignatureText: "",
+                                  signatureHash: ""
+                                })
                               });
+                              if (!res.ok) {
+                                throw new Error("HTTP error " + res.status);
+                              }
                               alert("Documento redefinido para pendente!");
                               await loadDocuments();
                               setSelectedDoc(null);

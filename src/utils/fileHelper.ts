@@ -1,5 +1,3 @@
-import { db } from "../firebase";
-import { collection, doc, setDoc, getDocs, deleteDoc } from "firebase/firestore";
 import { getFile, saveFile, deleteFile } from "./indexedDB";
 import { InternshipDocument } from "../types";
 
@@ -48,25 +46,19 @@ export async function resolveFileUrl(docId: string, firestoreFileUrl: string): P
     }
   }
 
-  // 2. Fetch from Firestore chunks subcollection
+  // 2. Fetch from PostgreSQL database via our Express API
   try {
-    const chunksColl = collection(db, "documents", docId, "chunks");
-    const querySnap = await getDocs(chunksColl);
-    if (!querySnap.empty) {
-      const docs = querySnap.docs;
-      // Sort chunks numerically (id: "0", "1", "2" etc)
-      docs.sort((a, b) => parseInt(a.id) - parseInt(b.id));
-      const base64Parts = docs.map(d => d.data().data as string);
-      const assembledBase64 = base64Parts.join("");
-
-      if (assembledBase64.startsWith("data:application/pdf;base64,")) {
+    const res = await fetch(`/api/documents/${docId}`);
+    if (res.ok) {
+      const docItem = await res.json();
+      if (docItem && docItem.fileUrl && docItem.fileUrl.startsWith("data:application/pdf;base64,")) {
         // Cache locally for instant consecutive visits
-        await saveFile(docId, assembledBase64);
-        return assembledBase64;
+        await saveFile(docId, docItem.fileUrl);
+        return docItem.fileUrl;
       }
     }
   } catch (error) {
-    console.error("Error loading PDF chunks from Firestore:", error);
+    console.error("Error loading PDF from PostgreSQL API:", error);
   }
 
   // 3. Last resort fallback
@@ -74,19 +66,9 @@ export async function resolveFileUrl(docId: string, firestoreFileUrl: string): P
 }
 
 export async function saveFileToChunks(docId: string, base64: string): Promise<void> {
-  const CHUNK_SIZE = 750000; // 750KB base64 chunk size (safely under 1MB document limit)
-  const totalLength = base64.length;
-  let index = 0;
-  
-  const promises = [];
-  for (let offset = 0; offset < totalLength; offset += CHUNK_SIZE) {
-    const chunkData = base64.substring(offset, offset + CHUNK_SIZE);
-    const chunkDocRef = doc(db, "documents", docId, "chunks", index.toString());
-    promises.push(setDoc(chunkDocRef, { data: chunkData }));
-    index++;
-  }
-  
-  await Promise.all(promises);
+  // PostgreSQL handles arbitrarily large text fields (up to 1GB), so we don't need chunking.
+  // The backend API handles the full save and storage at once!
+  return Promise.resolve();
 }
 
 export function getPlaceholderPdfBase64(): string {
@@ -109,21 +91,15 @@ export async function deleteFileFromDbAndCache(docId: string): Promise<void> {
     console.error("Error clearing offline document list:", error);
   }
 
-  // 3. Delete main document from Firestore
+  // 3. Delete document from backend database (which does SQL DELETE)
   try {
-    const docRef = doc(db, "documents", docId);
-    await deleteDoc(docRef);
+    const res = await fetch(`/api/documents/${docId}`, {
+      method: "DELETE"
+    });
+    if (!res.ok) {
+      console.error("Failed to delete document via PostgreSQL API");
+    }
   } catch (error) {
-    console.error("Error deleting document from Firestore:", error);
-  }
-
-  // 3. Delete chunks subcollection from Firestore
-  try {
-    const chunksColl = collection(db, "documents", docId, "chunks");
-    const querySnap = await getDocs(chunksColl);
-    const deletePromises = querySnap.docs.map(d => deleteDoc(d.ref));
-    await Promise.all(deletePromises);
-  } catch (error) {
-    console.error("Error deleting document chunks from Firestore:", error);
+    console.error("Error deleting document from PostgreSQL database:", error);
   }
 }

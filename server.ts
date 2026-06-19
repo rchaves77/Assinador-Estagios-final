@@ -2,6 +2,9 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import nodemailer from "nodemailer";
+import { db } from "./src/db/index.ts";
+import { coordinatorConfig, documents } from "./src/db/schema.ts";
+import { eq } from "drizzle-orm";
 
 async function startServer() {
   const app = express();
@@ -10,6 +13,170 @@ async function startServer() {
   // Increase body limit to handle PDF base64 uploads
   app.use(express.json({ limit: "15mb" }));
   app.use(express.urlencoded({ limit: "15mb", extended: true }));
+
+  // API router for coordinator configuration
+  app.get("/api/config", async (req, res) => {
+    try {
+      const configRows = await db.select().from(coordinatorConfig).where(eq(coordinatorConfig.id, "coordinator"));
+      if (configRows.length === 0) {
+        return res.status(404).json({ error: "Configuration not found" });
+      }
+      res.json(configRows[0]);
+    } catch (error: any) {
+      console.error("Failed to read coordinator config:", error);
+      res.status(500).json({ error: "Database error" });
+    }
+  });
+
+  app.post("/api/config", async (req, res) => {
+    const { name, title, institution, savedSignature, accessCode, signatureKey } = req.body;
+    try {
+      await db.insert(coordinatorConfig)
+        .values({
+          id: "coordinator",
+          name,
+          title,
+          institution,
+          savedSignature,
+          accessCode,
+          signatureKey
+        })
+        .onConflictDoUpdate({
+          target: coordinatorConfig.id,
+          set: {
+            name,
+            title,
+            institution,
+            savedSignature,
+            accessCode,
+            signatureKey
+          }
+        });
+      res.json({ success: true, message: "Configuration saved successfully" });
+    } catch (error: any) {
+      console.error("Failed to save coordinator config:", error);
+      res.status(500).json({ error: "Database error" });
+    }
+  });
+
+  // API router for internship documents
+  app.get("/api/documents", async (req, res) => {
+    try {
+      const list = await db.select().from(documents);
+      res.json(list);
+    } catch (error: any) {
+      console.error("Failed to list documents:", error);
+      res.status(500).json({ error: "Database error" });
+    }
+  });
+
+  app.get("/api/documents/:id", async (req, res) => {
+    const { id } = req.params;
+    try {
+      const docRows = await db.select().from(documents).where(eq(documents.id, id.toUpperCase()));
+      if (docRows.length === 0) {
+        return res.status(404).json({ error: "Document not found" });
+      }
+      res.json(docRows[0]);
+    } catch (error: any) {
+      console.error("Failed to get document:", error);
+      res.status(500).json({ error: "Database error" });
+    }
+  });
+
+  app.post("/api/documents", async (req, res) => {
+    const docData = req.body;
+    try {
+      await db.insert(documents)
+        .values({
+          id: docData.id,
+          studentName: docData.studentName,
+          studentRegistration: docData.studentRegistration,
+          studentEmail: docData.studentEmail,
+          studentPeriod: docData.studentPeriod,
+          concedenteName: docData.concedenteName,
+          internshipHours: Number(docData.internshipHours),
+          internshipStartDate: docData.internshipStartDate,
+          internshipEndDate: docData.internshipEndDate,
+          fileName: docData.fileName,
+          fileType: docData.fileType,
+          fileUrl: docData.fileUrl,
+          fileHash: docData.fileHash,
+          createdAt: docData.createdAt,
+          status: docData.status,
+          reviewedAt: docData.reviewedAt,
+          coordinatorFeedback: docData.coordinatorFeedback,
+          coordinatorName: docData.coordinatorName,
+          coordinatorSignatureText: docData.coordinatorSignatureText,
+          signatureHash: docData.signatureHash,
+          signaturePng: docData.signaturePng,
+          signatureKey: docData.signatureKey
+        })
+        .onConflictDoUpdate({
+          target: documents.id,
+          set: {
+            studentName: docData.studentName,
+            studentRegistration: docData.studentRegistration,
+            studentEmail: docData.studentEmail,
+            studentPeriod: docData.studentPeriod,
+            concedenteName: docData.concedenteName,
+            internshipHours: Number(docData.internshipHours),
+            internshipStartDate: docData.internshipStartDate,
+            internshipEndDate: docData.internshipEndDate,
+            fileName: docData.fileName,
+            fileType: docData.fileType,
+            fileUrl: docData.fileUrl,
+            fileHash: docData.fileHash,
+            status: docData.status,
+            reviewedAt: docData.reviewedAt,
+            coordinatorFeedback: docData.coordinatorFeedback,
+            coordinatorName: docData.coordinatorName,
+            coordinatorSignatureText: docData.coordinatorSignatureText,
+            signatureHash: docData.signatureHash,
+            signaturePng: docData.signaturePng,
+            signatureKey: docData.signatureKey
+          }
+        });
+      res.json({ success: true, message: "Document saved successfully" });
+    } catch (error: any) {
+      console.error("Failed to save document:", error);
+      res.status(500).json({ error: "Database error" });
+    }
+  });
+
+  app.put("/api/documents/:id", async (req, res) => {
+    const { id } = req.params;
+    const updateData = req.body;
+    try {
+      await db.update(documents)
+        .set({
+          status: updateData.status,
+          reviewedAt: updateData.reviewedAt,
+          coordinatorFeedback: updateData.coordinatorFeedback,
+          coordinatorName: updateData.coordinatorName,
+          coordinatorSignatureText: updateData.coordinatorSignatureText,
+          signatureHash: updateData.signatureHash,
+          signaturePng: updateData.signaturePng,
+          signatureKey: updateData.signatureKey
+        })
+        .where(eq(documents.id, id.toUpperCase()));
+      res.json({ success: true, message: "Document updated successfully" });
+    } catch (error: any) {
+      console.error("Failed to update document:", error);
+      res.status(500).json({ error: "Database error" });
+    }
+  });
+
+  app.delete("/api/documents/:id", async (req, res) => {
+    const { id } = req.params;
+    try {
+      await db.delete(documents).where(eq(documents.id, id.toUpperCase()));
+      res.json({ success: true, message: "Document deleted successfully" });
+    } catch (error: any) {
+      console.error("Failed to delete document:", error);
+      res.status(500).json({ error: "Database error" });
+    }
+  });
 
   // API router for sending emails
   app.post("/api/send-email", async (req, res) => {

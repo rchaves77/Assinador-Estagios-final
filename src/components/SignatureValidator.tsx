@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { db } from "../firebase";
-import { doc, getDoc } from "firebase/firestore";
+// Removed firestore imports
 import { InternshipDocument } from "../types";
 import { 
   ShieldCheck, ArrowLeft, Search, QrCode, Printer, 
@@ -64,14 +63,12 @@ export default function SignatureValidator() {
     let docData: InternshipDocument | null = null;
 
     try {
-      const docRef = doc(db, "documents", termCode);
-      const docSnap = await getDoc(docRef);
-
-      if (docSnap.exists()) {
-        docData = docSnap.data() as InternshipDocument;
+      const res = await fetch(`/api/documents/${termCode}`);
+      if (res.ok) {
+        docData = await res.json() as InternshipDocument;
       }
-    } catch (firestoreErr) {
-      console.warn("Firestore search failed, looking up locally offline instead", firestoreErr);
+    } catch (dbErr) {
+      console.warn("PostgreSQL search failed, looking up locally offline instead", dbErr);
     }
 
     // Lookup local offline storage as fallback if firestore returned empty or failed due to quota
