@@ -8,7 +8,8 @@ export const coordinatorConfig = pgTable("coordinator_config", {
   institution: text("institution").notNull(),
   savedSignature: text("saved_signature"), // Base64 signature
   accessCode: text("access_code").notNull(),
-  signatureKey: text("signature_key")
+  signatureKey: text("signature_key"),
+  email: text("email")
 });
 
 // Table to store the documents and verification data

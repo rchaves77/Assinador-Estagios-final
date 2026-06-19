@@ -29,7 +29,7 @@ async function startServer() {
   });
 
   app.post("/api/config", async (req, res) => {
-    const { name, title, institution, savedSignature, accessCode, signatureKey } = req.body;
+    const { name, title, institution, savedSignature, accessCode, signatureKey, email } = req.body;
     try {
       await db.insert(coordinatorConfig)
         .values({
@@ -39,7 +39,8 @@ async function startServer() {
           institution,
           savedSignature,
           accessCode,
-          signatureKey
+          signatureKey,
+          email
         })
         .onConflictDoUpdate({
           target: coordinatorConfig.id,
@@ -49,7 +50,8 @@ async function startServer() {
             institution,
             savedSignature,
             accessCode,
-            signatureKey
+            signatureKey,
+            email
           }
         });
       res.json({ success: true, message: "Configuration saved successfully" });
@@ -191,7 +193,7 @@ async function startServer() {
     const port = process.env.SMTP_PORT;
     const user = process.env.SMTP_USER;
     const pass = process.env.SMTP_PASS;
-    const from = process.env.SMTP_FROM || `"Sistema de Homologacao Odonto" <no-reply@unimeta.edu.br>`;
+    const from = process.env.SMTP_FROM || `"Sistema de Homologacao" <no-reply@unimeta.edu.br>`;
 
     if (!host || !user || !pass) {
       console.warn("SMTP credentials not configured, skipping real email send.");
@@ -200,6 +202,22 @@ async function startServer() {
         warning: "SMTP_NOT_CONFIGURED",
         message: "As credenciais de SMTP nao estao configuradas no servidor (.env). O email real nao pôde ser enviado, mas os dados foram chancelados no banco de dados com sucesso!"
       });
+    }
+
+    let coordinatorEmail = "";
+    let logoInstitution = "Centro Universitário Estácio Unimeta";
+    try {
+      const configRows = await db.select().from(coordinatorConfig).where(eq(coordinatorConfig.id, "coordinator"));
+      if (configRows.length > 0) {
+        if (configRows[0].email) {
+          coordinatorEmail = configRows[0].email;
+        }
+        if (configRows[0].institution) {
+          logoInstitution = configRows[0].institution;
+        }
+      }
+    } catch (e) {
+      console.error("Failed to query coordinator email or institution for SMTP", e);
     }
 
     try {
@@ -217,21 +235,21 @@ async function startServer() {
         from,
         to,
         subject: `Termo de Estagio Chancelado - Protocolo ${docId}`,
-        text: `Ola ${studentName},\n\nSeu Termo de Estagio de Odontologia foi assinado e chancelado eletronicamente pelo coordenador do curso!\n\nCódigo de Autenticidade (Protocolo): ${docId}\n\nSeu termo assinado e chancelado foi enviado em anexo.\n\nVocê pode consultar a validade juridica deste documento a qualquer momento acessando o link:\n${verificationUrl}\n\nAtenciosamente,\nCoordenacao de Odontologia Estacio Unimeta`,
+        text: `Ola ${studentName},\n\nSeu Termo de Estagio foi assinado e chancelado eletronicamente pelo coordenador do curso!\n\nCódigo de Autenticidade (Protocolo): ${docId}\n\nSeu termo assinado e chancelado foi enviado em anexo.\n\nVocê pode consultar a validade juridica deste documento a qualquer momento acessando o link:\n${verificationUrl}\n\nAtenciosamente,\nCoordenacao de Estagio - ${logoInstitution}`,
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
-            <h2 style="color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 10px; margin-top: 0;">Termo de Estagio Chancelado</h2>
-            <p>Ola <strong>${studentName}</strong>,</p>
-            <p>Seu Termo de Estagio de Odontologia foi assinado e chancelado eletronicamente pela Coordenacao do Curso.</p>
+            <h2 style="color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 10px; margin-top: 0;">Termo de Estágio Chancelado</h2>
+            <p>Olá <strong>${studentName}</strong>,</p>
+            <p>Seu Termo de Estágio foi assinado e chancelado eletronicamente pela Coordenação do Curso.</p>
             
             <div style="background-color: #f8fafc; border-left: 4px solid #b45309; padding: 15px; margin: 20px 0;">
               <p style="margin: 0; font-size: 14px; color: #475569;"><strong>Código de Autenticidade (Protocolo):</strong></p>
               <p style="margin: 5px 0 0 0; font-family: monospace; font-size: 16px; color: #b45309; font-weight: bold;">${docId}</p>
             </div>
 
-            <p>O arquivo PDF contendo a certificacao eletronica, a assinatura eletronica do coordenador e o QR Code de autenticidade está <strong>anexado a este e-mail</strong>.</p>
+            <p>O arquivo PDF contendo a certificação eletrônica, a assinatura eletrônica do coordenador e o QR Code de autenticidade está <strong>anexado a este e-mail</strong>.</p>
             
-            <p>Você e a instituicao concedente também podem verificar a validade juridica deste documento a qualquer momento clicando no botao abaixo:</p>
+            <p>Você e a instituição concedente também podem verificar a validade jurídica deste documento a qualquer momento clicando no botão abaixo:</p>
             
             <div style="text-align: center; margin: 30px 0;">
               <a href="${verificationUrl}" target="_blank" style="background-color: #1e3a8a; color: white; padding: 12px 24px; text-decoration: none; font-weight: bold; border-radius: 4px; display: inline-block;">Verificar Validade do Termo</a>
@@ -239,11 +257,16 @@ async function startServer() {
 
             <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 30px 0;" />
             <p style="font-size: 11px; color: #64748b; text-align: center; margin-bottom: 0;">
-              Centro Universitario Estacio Unimeta • Sistema de Homologacao de Estágios de Odontologia
+              ${logoInstitution} • Sistema de Homologação de Estágios
             </p>
           </div>
         `,
       };
+
+      if (coordinatorEmail) {
+        mailOptions.replyTo = coordinatorEmail;
+        mailOptions.cc = coordinatorEmail; // Send a carbon copy of the chancelled document to the professor/coordinator!
+      }
 
       if (pdfBase64) {
         // base64 contains the data-URI prefix "data:application/pdf;base64,". Strip it for nodemailer attachment

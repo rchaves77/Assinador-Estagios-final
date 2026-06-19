@@ -38,4 +38,5 @@ export interface CoordinatorConfig {
   savedSignature?: string; // Base64 drawing (deprecated optional fallback)
   accessCode: string; // Security code of coordinator
   signatureKey?: string; // Electronic signature key (letters and numbers)
+  email?: string; // Coordinator's email address
 }

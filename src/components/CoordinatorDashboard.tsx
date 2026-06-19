@@ -24,13 +24,15 @@ export default function CoordinatorDashboard() {
     name: "",
     title: "Coordenador(a) de Curso de Odontologia",
     institution: "Centro Universitário Estácio Unimeta",
-    accessCode: ""
+    accessCode: "",
+    email: ""
   });
 
   // Edit Settings states for electronic signature key
   const [editName, setEditName] = useState("");
   const [editTitle, setEditTitle] = useState("");
   const [editSignatureKey, setEditSignatureKey] = useState("");
+  const [editEmail, setEditEmail] = useState("");
 
   // Sync settings inputs when config loads
   useEffect(() => {
@@ -38,6 +40,7 @@ export default function CoordinatorDashboard() {
       setEditName(config.name);
       setEditTitle(config.title);
       setEditSignatureKey(config.signatureKey || "");
+      setEditEmail(config.email || "");
     }
   }, [config]);
 
@@ -163,7 +166,7 @@ export default function CoordinatorDashboard() {
   // Onboarding submit
   const handleSetupSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!setupForm.name || !setupForm.accessCode) {
+    if (!setupForm.name || !setupForm.accessCode || !setupForm.email) {
       alert("Preencha todos os campos e o código de acesso de segurança.");
       return;
     }
@@ -176,7 +179,8 @@ export default function CoordinatorDashboard() {
         title: setupForm.title.trim(),
         institution: setupForm.institution.trim(),
         accessCode: setupForm.accessCode.trim(),
-        signatureKey: randomKey
+        signatureKey: randomKey,
+        email: setupForm.email.trim()
       };
 
       const res = await fetch("/api/config", {
@@ -269,7 +273,7 @@ export default function CoordinatorDashboard() {
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!config) return;
-    if (!editName.trim() || !editTitle.trim() || !editSignatureKey.trim()) {
+    if (!editName.trim() || !editTitle.trim() || !editSignatureKey.trim() || !editEmail.trim()) {
       alert("Por favor, preencha todos os campos do perfil de assinatura eletrônica.");
       return;
     }
@@ -280,7 +284,8 @@ export default function CoordinatorDashboard() {
         ...config,
         name: editName.trim(),
         title: editTitle.trim(),
-        signatureKey: editSignatureKey.trim().toUpperCase()
+        signatureKey: editSignatureKey.trim().toUpperCase(),
+        email: editEmail.trim()
       };
       
       const res = await fetch("/api/config", {
@@ -573,6 +578,18 @@ export default function CoordinatorDashboard() {
                 />
               </div>
 
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-black uppercase tracking-wider text-slate-800">Seu E-mail Institucional</label>
+                <input
+                  type="email"
+                  required
+                  placeholder="Ex: ROMUL.SILVA@professores.estacio.br"
+                  value={setupForm.email}
+                  onChange={e => setSetupForm({ ...setupForm, email: e.target.value })}
+                  className="px-4 py-2.5 text-sm border-2 border-slate-200 focus:border-slate-900 rounded-none bg-slate-50 focus:bg-white font-bold text-slate-800 focus:outline-none"
+                />
+              </div>
+
               <div className="flex flex-col gap-1.5 bg-slate-50 p-4 rounded-none border-2 border-slate-900">
                 <label className="text-xs font-black uppercase tracking-widest text-slate-900 flex items-center gap-1">
                   <KeyRound className="w-4 h-4 text-slate-900" /> Criar Código de Acesso (Senha)
@@ -738,6 +755,18 @@ export default function CoordinatorDashboard() {
                     className="px-3 py-2 text-xs border-2 border-slate-200 focus:border-odonto-navy rounded-none font-bold text-slate-800 bg-slate-50 focus:bg-white"
                   />
                 </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-800">Seu E-mail Institucional</label>
+                <input
+                  type="email"
+                  required
+                  placeholder="Ex: ROMUL.SILVA@professores.estacio.br"
+                  value={editEmail}
+                  onChange={e => setEditEmail(e.target.value)}
+                  className="px-3 py-2 text-xs border-2 border-slate-200 focus:border-odonto-navy rounded-none font-bold text-slate-800 bg-slate-50 focus:bg-white"
+                />
               </div>
 
               <div className="bg-slate-50 p-4 border-2 border-dashed border-odonto-navy space-y-3">
