@@ -177,9 +177,7 @@ export default function StudentPortal() {
       // Always save file into local IndexedDB
       await saveFile(id, processedFileData.base64);
 
-      const fileUrlToSave = processedFileData.isLarge 
-        ? getPlaceholderPdfBase64() 
-        : processedFileData.base64;
+      const fileUrlToSave = processedFileData.base64;
 
       const newDoc: InternshipDocument = {
         id,

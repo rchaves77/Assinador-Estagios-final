@@ -11,8 +11,8 @@ async function startServer() {
   const PORT = 3000;
 
   // Increase body limit to handle PDF base64 uploads
-  app.use(express.json({ limit: "15mb" }));
-  app.use(express.urlencoded({ limit: "15mb", extended: true }));
+  app.use(express.json({ limit: "50mb" }));
+  app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
   // API router for coordinator configuration
   app.get("/api/config", async (req, res) => {

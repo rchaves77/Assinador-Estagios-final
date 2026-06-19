@@ -386,6 +386,11 @@ export default function CoordinatorDashboard() {
           })
         });
 
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Server error (${response.status}): ${errText.substring(0, 150)}`);
+        }
+
         const mailRes = await response.json();
         if (mailRes.success) {
           emailStatusMessage = `📨 Um e-mail com a Certidão de Autenticidade Digital (Protocolo: ${selectedDoc.id}) e o arquivo do Termo Assinado e Chancelado (.pdf) em anexo foi enviado para: ${selectedDoc.studentEmail}`;

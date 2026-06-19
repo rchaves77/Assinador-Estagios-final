@@ -11,13 +11,33 @@ interface DocumentViewerProps {
 }
 
 function safeBase64ToBlobUrl(fileUrl: string, defaultType = "application/pdf"): string {
+  if (!fileUrl || typeof fileUrl !== "string") {
+    return "";
+  }
+  // Se for uma URL normal, caminho relativo ou URL de arquivo temporário (blob:), retorna diretamente
+  if (!fileUrl.startsWith("data:")) {
+    return fileUrl;
+  }
   try {
-    const parts = fileUrl.split(";base64,");
+    let decoded = fileUrl;
+    if (decoded.includes("%")) {
+      try {
+        decoded = decodeURIComponent(decoded);
+      } catch (e) {
+        console.warn("Input has % but failed decodeURIComponent:", e);
+      }
+    }
+    const parts = decoded.split(";base64,");
     const contentType = parts[0].split(":")[1] || defaultType;
     const raw = parts[1] || parts[0];
     
-    // Clean whitespaces, newlines, and retrieve only valid Base64 characters
-    const cleanRaw = raw.replace(/[^A-Za-z0-9+/=]/g, "");
+    // Filtra caracteres válidos do Base64
+    let cleanRaw = raw.replace(/[^A-Za-z0-9+/=]/g, "");
+    
+    // Garante que o comprimento seja múltiplo de 4 para evitar falhas no atob
+    while (cleanRaw.length % 4 !== 0) {
+      cleanRaw += "=";
+    }
     
     const byteCharacters = atob(cleanRaw);
     const byteNumbers = new Array(byteCharacters.length);
